@@ -9,7 +9,8 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
-
+from sqlalchemy import Column, Integer, ARRAY, String, Text
+from adsputils import get_date, UTCDateTime
 
 # revision identifiers, used by Alembic.
 revision: str = '74a83030b18d'
@@ -18,13 +19,31 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
+
+    # Overrides table
+    op.create_table('overrides',
+                    Column('id',Integer, primary_key=True),
+                    Column('override', ARRAY(String)),
+                    Column('created', UTCDateTime, default=get_date()),
+                    )
+
+    # Models table
+    op.create_table('models',
+                    Column('id', Integer, primary_key=True),
+                    Column('model', Text),
+                    Column('tokenizer', Text),
+                    Column('postprocessing', Text),
+                    Column('labels', Text),
+                    Column('created', UTCDateTime, default=get_date()),
+                    )
+
     #Scores table
     op.create_table('scores',
                     Column('id', Integer, primary_key=True),
                     Column('bibcode',String(19)),
                     Column('scores', Text),
-                    Column('overrides_id', Integer),
-                    Column('models_id', Integer),
+                    Column('overrides_id', Integer, nullable=True),
+                    Column('models_id', Integer, nullable=True),
                     Column('created', UTCDateTime, default=get_date()),
                     )
     op.create_foreign_key('fk_overrides_id_scores',
@@ -38,12 +57,6 @@ def upgrade() -> None:
                           ['models_id'],
                           ['id'])
 
-    # Overrides table
-    op.create_table('overrides',
-                    Column('id',Integer, primary_key=True),
-                    Column('override', ARRAY(String)),
-                    Column('created', UTCDateTime, default=get_date()),
-                    )
 
     # Final Collection table
     op.create_table('final_collection',
@@ -58,12 +71,6 @@ def upgrade() -> None:
                           ['score_id'],
                           ['id'])
 
-    # Models table
-    op.create_table('models',
-                    Column('id', Integer, primary_key=True),
-                    Column('model', Text),
-                    Column('created', UTCDateTime, default=get_date()),
-                    )
 
 def downgrade() -> None:
     op.drop_constraint('fk_overrides_id_scores', 'scores', type_='foreignkey')

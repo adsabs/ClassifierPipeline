@@ -172,6 +172,14 @@ def score_record(record):
     record['model'] = model_dict
 
 
+    record['postprocessing'] = {'ADDITIONAL_EARTH_SCIENCE_PROCESSING' : True,
+                                'ADDITIONAL_EARTH_SCIENCE_PROCESSING_THRESHOLD' : 0.015,
+                                'CLASSIFICATION_THRESHOLDS' : [0.06, 0.03, 0.04, 0.02, 0.99, 0.02, 0.02, 0.99]}
+
+
+    # print("checkpoint000")
+    # import pdb;pdb.set_trace()
+
     # print("Record: {}".format(record['bibcode']))
     # print("Text: {}".format(record['text']))
     # print("Categories: {}".format(record['categories']))

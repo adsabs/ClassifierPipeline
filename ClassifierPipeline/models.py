@@ -17,13 +17,16 @@ class ScoreTable(Base):
     bibcode = Column(String(19))
     scores = Column(Text)
     created = Column(UTCDateTime, default=get_date)
-    override_id = Column(Integer, ForeignKey('overrides.id'))
+    overrides_id = Column(Integer, ForeignKey('overrides.id'))
+    models_id = Column(Integer, ForeignKey('models.id'))
 
 class ModelTable(Base):
     __tablename__ = 'models'
     id = Column(Integer, primary_key=True)
     model = Column(Text)
+    tokenizer = Column(Text)
     postprocessing = Column(Text)
+    labels = Column(Text)
     created = Column(UTCDateTime, default=get_date)
 
 class OverrideTable(Base):
