@@ -169,7 +169,10 @@ def score_record(record):
 
     # Append model information to record
     # record['model'] = model_dict['model']
-    record['model'] = model_dict
+    # record['model'] = model_dict
+    record['model'] = {'model' : config['CLASSIFICATION_PRETRAINED_MODEL'],
+                       'revision' : config['CLASSIFICATION_PRETRAINED_MODEL_REVISION'],
+                       'tokenizer' : config['CLASSIFICATION_PRETRAINED_MODEL_TOKENIZER']}
 
 
     record['postprocessing'] = {'ADDITIONAL_EARTH_SCIENCE_PROCESSING' : True,

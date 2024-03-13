@@ -87,24 +87,25 @@ class SciXClassifierCelery(ADSCelery):
         # Models Table
 
 
-        labels_dict = {'labels': record['model']['labels'],
-                      'id2label': record['model']['id2label'],
-                      'label2id': record['model']['label2id']}
+        # labels_dict = {'labels': record['model']['labels'],
+        #               'id2label': record['model']['id2label'],
+        #               'label2id': record['model']['label2id']}
 
 
         # Note that bot model and tokenizer are objects and need to be
         # converted to strings
                       
-        model_dictionary_string = {k: str(v) for k, v in record['model']['model'].__dict__.items()}
-        tokenizer_dictionary_string = {k: str(v) for k, v in record['model']['tokenizer'].__dict__.items()}
+        # model_dictionary_string = {k: str(v) for k, v in record['model']['model'].__dict__.items()}
+        # tokenizer_dictionary_string = {k: str(v) for k, v in record['model']['tokenizer'].__dict__.items()}
 
-        model_row = models.ModelTable(model=model_dictionary_string,
-                                      tokenizer=tokenizer_dictionary_string,
-                                      postprocessing=json.dumps(record['postprocessing']),
-                                      labels=json.dumps(labels_dict)
+        model_row = models.ModelTable(model=record['model']['model'],
+                                      revision=record['model']['revision'],
+                                      tokenizer=record['model']['tokenizer'],
+                                      postprocessing=json.dumps(record['postprocessing'])
+                                      # labels=json.dumps(labels_dict)
                                       )
         
-        import pdb; pdb.set_trace()
+        # import pdb; pdb.set_trace()
 
         # for k, v in rmd.items():
         #     print('-----------------')
@@ -140,18 +141,20 @@ class SciXClassifierCelery(ADSCelery):
 
             # check_model_query = session.query(models.ModelTable).filter(models.ModelTable.model == model_dictionary_string).order_by(models.ModelTable.created.desc()).first()
             # check_model_query = session.query(models.ModelTable).filter(models.ModelTable.model == model_dictionary_string).order_by(models.ModelTable.created.desc()).first()
-            session.add(model_row)
-            session.commit()
-            print('checkpoint001')
-            import pdb; pdb.set_trace()
+            # session.add(model_row)
+            # session.commit()
 
-            check_model_query = session.query(ModelTable).filter(ModelTable.model == record['model'] and ModelTable.postprocessing == record['postprocessing']).order_by(ModelTable.created.desc()).first()
+            check_model_query = session.query(models.ModelTable).filter(models.ModelTable.model == record['model']['model'] and models.ModelTable.postprocessing == record['postprocessing']).order_by(models.ModelTable.created.desc()).first()
 
+            # print('checkpoint001')
+            # import pdb; pdb.set_trace()
             if check_model_query is None:
                 session.add(model_row)
                 session.commit()
                 # do a commit then can try model_row.id for the scores column below
             
+            print('checkpoint001')
+            import pdb; pdb.set_trace()
             
 
             # Check if record is already in database

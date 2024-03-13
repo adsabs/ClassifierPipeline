@@ -31,9 +31,10 @@ def upgrade() -> None:
     op.create_table('models',
                     Column('id', Integer, primary_key=True),
                     Column('model', Text),
+                    Column('revision', Text),
                     Column('tokenizer', Text),
                     Column('postprocessing', Text),
-                    Column('labels', Text),
+                    # Column('labels', Text),
                     Column('created', UTCDateTime, default=get_date()),
                     )
 

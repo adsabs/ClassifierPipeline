@@ -24,9 +24,10 @@ class ModelTable(Base):
     __tablename__ = 'models'
     id = Column(Integer, primary_key=True)
     model = Column(Text)
+    revision = Column(Text)
     tokenizer = Column(Text)
     postprocessing = Column(Text)
-    labels = Column(Text)
+    # labels = Column(Text)
     created = Column(UTCDateTime, default=get_date)
 
 class OverrideTable(Base):
