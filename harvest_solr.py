@@ -4,14 +4,8 @@ import json
 
 import requests
 from adsputils import setup_logging, load_config
-# from tqdm import tqdm
-# import ptree
 
-#from ..utilities import remove_control_chars
-# import remove_control_chars as rcc
 
-# load API config
-#solr_config = load_config(proj_home=os.path.realpath(os.path.join(os.path.dirname(__file__), '../../')))
 solr_config = load_config(proj_home=os.path.realpath(os.path.join(os.path.dirname(__file__), '.')))
 
 
@@ -26,29 +20,16 @@ def harvest_solr(bibcodes_list, start_index=0, fields='bibcode, title, abstract'
     fields (optional): fields to harvest from the API. Default is 'bibcode, title, abstract'.
     '''
 
-    # save the log next to the bibcode files
     logger = setup_logging('harvest_clean', proj_home=os.path.dirname('harvest_log.txt'))
 
-    # COnvert list of bibcodes to a set for comparison later
-
-    out_path = 'data/'
-
-    # starting index of harvesting
     idx=start_index
-
-    # params for stats
-    # number of bibcodes to harvest at once
     step_size = 2000
-    # step_size = 20
+    # limit attempts to 10
+    total_attempts = 10
 
-    # json dict to dump
-    dataset = {}
 
     logger.info('Start of harvest')
-    #start progress bar
-    # pbar = tqdm(total=len(bibcodes_list), initial=start_index)
-    # print('checkpoint harvest_solr.py')
-    # import pdb;pdb.set_trace()
+    print('Harvesting titles and abstracts from Solr')
 
     # loop through list of bibcodes and query solr
     while idx<len(bibcodes_list):
@@ -57,7 +38,6 @@ def harvest_solr(bibcodes_list, start_index=0, fields='bibcode, title, abstract'
         # string to log
         to_log = ''
 
-        # limit attempts to 10
         attempts = 0
         successful_req = False
 
@@ -66,7 +46,7 @@ def harvest_solr(bibcodes_list, start_index=0, fields='bibcode, title, abstract'
         bibcodes = 'bibcode\n' + '\n'.join(input_bibcodes)
 
         # start attempts
-        while (not successful_req) and (attempts<10):
+        while (not successful_req) and (attempts<total_attempts):
             r_json = None
             r = requests.post(solr_config['API_URL']+'/search/bigquery',
                     params={'q':'*:*', 'wt':'json', 'fq':'{!bitset}', 'fl':fields, 'rows':len(input_bibcodes)},
@@ -90,12 +70,9 @@ def harvest_solr(bibcodes_list, start_index=0, fields='bibcode, title, abstract'
             #extract json
             r_json = r.json()
 
-            # add to stat counts
-            # astronomy_count += len(r_json['response']['docs'])
 
             # info to log
             to_log += 'Harvested links up to {}\n'.format(idx)
-            # to_log += 'Running astronomy count={}, body count={}, ack count={}\n'.format(astronomy_count,body_count,ack_count)
 
 
         # if not successful_req
@@ -103,44 +80,22 @@ def harvest_solr(bibcodes_list, start_index=0, fields='bibcode, title, abstract'
             # add to log
             to_log += 'FAILING BIBCODES: {}\n'.format(input_bibcodes)
 
-#             # raise error
-#             r.raise_for_status()
 
-        print()
-        print('index')
-        print(idx)
         # import pdb;pdb.set_trace()
 
         
         end_time = time.perf_counter()
         total_time = end_time - start_time
         print()
-        print()
-        print('index')
-        print(idx)
-        print()
-        print('Time for loop segment')
-        print(total_time)
-
-        # with open('data/abstracts/test.txt','w') as f:
-        #     f.write("test")
-
-        # import pdb;pdb.set_trace()
+        print(f'Harvested bibcodes starting at: {idx}')
 
         # pause to not go over API rate limit
         if len(bibcodes_list)>step_size:
             time.sleep(45)
 
-        # ALWAYS DO:
-        # increment counter for next batch
         idx+=step_size
-        # update progress bar
-        # pbar.update(step_size)
-        #update log
         logger.info(to_log)
 
-    # print('checkpoint harvest_solr.py')
-    # import pdb;pdb.set_trace()
 
     return transform_r_json(r_json)
 
@@ -150,11 +105,9 @@ def transform_r_json(r_json):
     Extract the needed information from the json response from the solr query.
     """
 
-    # extract the needed information
     # Bibcoded and titles are always present
     bibcodes = [doc['bibcode'] for doc in r_json['response']['docs']]
     titles = [doc['title'][0] for doc in r_json['response']['docs']] # without [0] it returns a list
-    # abstracts = [doc['abstract'] for doc in r_json['response']['docs']]
     # Abstracts are not always present
     abstracts = []
     for doc in r_json['response']['docs']:
@@ -163,11 +116,9 @@ def transform_r_json(r_json):
         else:
             abstracts.append('')
 
-    # list of dictionaries with the bibcode, title, and abstract for each record
     record_list = [{'bibcode': bibcodes[i],
                     'title' : titles[i],
                     'abstract' : abstracts[i],
                     'text': f'{titles[i]} {abstracts[i]}'} for i in range(len(bibcodes))]
 
-    # return bibcodes, titles, abstracts
     return record_list

@@ -78,7 +78,8 @@ def batch_assign_SciX_categories(list_of_texts, tokenizer, model,labels,id2label
     
     # forward call
     with no_grad():
-        for split_input_ids_with_tokens in tqdm(list_of_split_input_ids_with_tokens):
+        # for split_input_ids_with_tokens in tqdm(list_of_split_input_ids_with_tokens):
+        for split_input_ids_with_tokens in list_of_split_input_ids_with_tokens:
             # make predictions
             predictions = model(input_ids=tensor(split_input_ids_with_tokens)).logits.sigmoid()
             
