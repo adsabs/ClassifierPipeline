@@ -23,6 +23,7 @@ def upgrade() -> None:
     # Overrides table
     op.create_table('overrides',
                     Column('id',Integer, primary_key=True),
+                    Column('bibcode',String(19)),
                     Column('override', ARRAY(String)),
                     Column('created', UTCDateTime, default=get_date()),
                     )
@@ -31,8 +32,8 @@ def upgrade() -> None:
     op.create_table('models',
                     Column('id', Integer, primary_key=True),
                     Column('model', Text),
-                    Column('revision', Text),
-                    Column('tokenizer', Text),
+                    # Column('revision', Text),
+                    # Column('tokenizer', Text),
                     Column('postprocessing', Text),
                     # Column('labels', Text),
                     Column('created', UTCDateTime, default=get_date()),
@@ -62,6 +63,7 @@ def upgrade() -> None:
     # Final Collection table
     op.create_table('final_collection',
                     Column('id', Integer, primary_key=True),
+                    Column('bibcode',String(19)),
                     Column('score_id', Integer),
                     Column('collection', ARRAY(String)),
                     Column('created', UTCDateTime, default=get_date()),

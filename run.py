@@ -97,7 +97,7 @@ def load_model_and_tokenizer(pretrained_model_name_or_path=None, revision=None, 
 
     return model_dict
 
-def prepare_records(records_path):
+def prepare_records(records_path,validate=False):
     """
     Takes a path to a .csv file of records and converts each record into a
     dictionary with the following keys: bibcode and text (a combination of 
@@ -113,7 +113,9 @@ def prepare_records(records_path):
     """
     # Open .csv file and read in records
     # Note: that this method requres the input file to have the following
-    # columns: bibcode, title, abstract
+    # Initial input columns: bibcode, title, abstract
+    # Corrected input columns:
+    # bibcode,title,abstract,categories,scores,collections,collection_scores,earth_science_adjustment,override
     with open(records_path, 'r') as f: 
         csv_reader = csv.reader(f)
         headers = next(csv_reader)
@@ -122,13 +124,23 @@ def prepare_records(records_path):
             record = {}
             record['bibcode'] = row[0]
             record['text'] = row[1] + ' ' + row[2]
+            record['validate'] = validate
 
-            print('testing message')
+            if validate:
+                record['override'] = row[8].split(',')
+            else:
+                record['override'] = None
+
+            # print('testing message')
+            # import pdb;pdb.set_trace()
             # Now send record to classification queue
-            # For Testing
-            tasks.task_send_input_record_to_classifier(record)
-            # For Production
-            # tasks.task_send_input_record_to_classifier.delay(record)
+            if validate:
+                tasks.task_index_classified_record(record)
+            else:
+                # For Testing
+                tasks.task_send_input_record_to_classifier(record)
+                # For Production
+                # tasks.task_send_input_record_to_classifier.delay(record)
 
 
 def score_record(record):
@@ -197,11 +209,11 @@ def classify_record_from_scores(record):
     Parameters
     ----------
     record : dictionary (required) (default=None) Dictionary with the following
-        keys: bibcode, text, categories, scores, and model information
+        keys: bibcode, text, validate, categories, scores, and model information
 
     Returns
     -------
-    record : dictionary with the following keys: bibcode, text, categories,
+    record : dictionary with the following keys: bibcode, text, validate, categories,
         scores, model information, and Collections
     """
 
@@ -285,6 +297,7 @@ if __name__ == '__main__':
     # import pdb;pdb.set_trace()
     if args.validate:
         print("Validating records")
+        prepare_records(records_path,validate=True)
 
     # import pdb;pdb.set_trace()
     if args.new_records:

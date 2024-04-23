@@ -1,3 +1,4 @@
+import os
 import json
 import pickle
 import zlib
@@ -23,6 +24,7 @@ from sqlalchemy.orm import scoped_session, sessionmaker
 # import time
 # import traceback
 
+proj_home = os.path.realpath(os.path.join(os.path.dirname(__file__), "../"))
 # global objects; we could make them belong to the app object but it doesn't seem necessary
 # unless two apps with a different endpint/config live along; TODO: move if necessary
 # cache = cachetools.TTLCache(maxsize=1024, ttl=3600, timer=time.time, missing=None, getsizeof=None)
@@ -61,127 +63,22 @@ class SciXClassifierCelery(ADSCelery):
                 to the database
         """
         print('Indexing record in index_record')
-    # id = Column(Integer, primary_key=True)
-    # bibcode = Column(String(19), unique=True)
-    # scores = Column(Text)
-    # created = Column(UTCDateTime, default=get_date)
 
-        # Scores Table
-
-        scores = {'scores': {cat:score for cat, score in zip(record['categories'], record['scores'])},
-                  'earth_science_adjustment': record['earth_science_adjustment'],
-                  'collections': record['collections']}
+        # Start with Model Table and Overrides Table then link to Scores Table
 
         # Just for initialy working out the logic
-        overrides_id = None
-        models_id = None
+        # overrides_id = None
+        # models_id = None
         
-        score_row = models.ScoreTable(bibcode=record['bibcode'], 
-                                         # scores=json.dumps(scores))
-                                        scores=json.dumps(scores),
-                                        overrides_id = overrides_id,
-                                        models_id = models_id
-                                        ) 
-
-
-        # Models Table
-
-
-        # labels_dict = {'labels': record['model']['labels'],
-        #               'id2label': record['model']['id2label'],
-        #               'label2id': record['model']['label2id']}
-
-
-        # Note that bot model and tokenizer are objects and need to be
-        # converted to strings
-                      
-        # model_dictionary_string = {k: str(v) for k, v in record['model']['model'].__dict__.items()}
-        # tokenizer_dictionary_string = {k: str(v) for k, v in record['model']['tokenizer'].__dict__.items()}
-
-        model_row = models.ModelTable(model=record['model']['model'],
-                                      revision=record['model']['revision'],
-                                      tokenizer=record['model']['tokenizer'],
-                                      postprocessing=json.dumps(record['postprocessing'])
-                                      # labels=json.dumps(labels_dict)
-                                      )
-        
-        # import pdb; pdb.set_trace()
-
-        # for k, v in rmd.items():
-        #     print('-----------------')
-        #     print(k, v)
-        #     print('-----------------')
-
-        # import pdb; pdb.set_trace()
-
-        # Overrides Table
-            # This will be used only if 
-            #  1) If an override already exists for a record and
-            #       The same model and postprocessing is the same
-            #  2) If a Curator adds an override during the validation step
-
-
-
-        # Final Collection Table
-        # final_collection = record['collections']
-        final_collections_row = models.FinalCollectionTable(collection = record['collections']
-                                                            )
-
-
-
-        # res = []
-        with self.session_scope() as session:
-
-            # import pdb; pdb.set_trace()
-            # session.add(score_table)
-            # session.commit()
-            
-            # First check if the model exists
-            # check_model_query = session.query(models.ModelTable).filter(models.ModelTable.model == pickle.dumps(record['model']['model']) and models.ModelTable.postprocessing == json.dumps(record['postprocessing'])).order_by(models.ModelTable.created.desc()).first()
-
-            # check_model_query = session.query(models.ModelTable).filter(models.ModelTable.model == model_dictionary_string).order_by(models.ModelTable.created.desc()).first()
-            # check_model_query = session.query(models.ModelTable).filter(models.ModelTable.model == model_dictionary_string).order_by(models.ModelTable.created.desc()).first()
-            # session.add(model_row)
-            # session.commit()
-
-            check_model_query = session.query(models.ModelTable).filter(models.ModelTable.model == record['model']['model'] and models.ModelTable.postprocessing == record['postprocessing']).order_by(models.ModelTable.created.desc()).first()
-
-            # print('checkpoint001')
-            # import pdb; pdb.set_trace()
-            if check_model_query is None:
-                session.add(model_row)
-                session.commit()
-                # do a commit then can try model_row.id for the scores column below
-            
-            print('checkpoint001')
-            import pdb; pdb.set_trace()
-            
-
-            # Check if record is already in database
-        
-
-            check_query = session.query(ScoreTable).filter(ScoreTable.bibcode == record['bibcode']).order_by(ScoreTable.created.desc()).first()
-
             # Process 1
             # If the record does not exist
-            # 1) Add record to Scores Table
-            # 2) Add scores to Final Collections Table
-            # 3) Check if model is in model table
-            #    a) If so link scores to model
-            #    b) Add model to Model Table and the link to Score Table
-            if check_query is None:
-
-                # Add record to score table
-                session.add(score_row)
-                session.add(final_collection_row)
-
-
-
-
+            # 1) Check if model is in model table
+            #    a) Add model to Model Table and the link to Score Table
+            # 2) Add record to Scores Table
+            # 3) Add scores to Final Collections Table
 
             # Process 2
-            # If the record exists
-            #   1) check if there is an ovverride
+                #check if there is an ovverride
             #       a) True - override exists
             #               add scores to Score Table and link to
             #               existing override
@@ -192,12 +89,108 @@ class SciXClassifierCelery(ADSCelery):
             #       a) If not add scores and use for Final Collection Table 
             #           following process 1
 
+        # print('checkpoint001')
+        # import pdb; pdb.set_trace()
+        with self.session_scope() as session:
 
-            print('checkpoint002')
-            import pdb; pdb.set_trace()
+            if record['validate'] is False:
+
+                model_row = models.ModelTable(model=json.dumps(record['model']),
+                                              # revision=record['model']['revision'],
+                                              # tokenizer=record['model']['tokenizer'],
+                                              postprocessing=json.dumps(record['postprocessing'])
+                                              )
+
+                # Check if model is already in the database
+                check_model_query = session.query(models.ModelTable).filter(models.ModelTable.model == record['model']['model'] and models.ModelTable.postprocessing == record['postprocessing']).order_by(models.ModelTable.created.desc()).first()
+
+                if check_model_query is None:
+                    session.add(model_row)
+                    session.commit()
+                    models_id = model_row.id
+                else:
+                    models_id = check_model_query.id
+
+                
+                # Check if there is an override
+                check_overrides_query = session.query(models.OverrideTable).filter(models.OverrideTable.bibcode == record['bibcode']).order_by(models.OverrideTable.created.desc()).first()
+
+                if check_overrides_query is not None:
+                    final_collections = check_overrides_query.override
+                    overrides_id = check_overrides_query.id
+                else:
+                    final_collections = record['collections']
+                    overrides_id = None
+
+                # print('checkpoint001')
+                # import pdb; pdb.set_trace()
             
+                # Now create the score table
+                scores = {'scores': {cat:score for cat, score in zip(record['categories'], record['scores'])},
+                          'earth_science_adjustment': record['earth_science_adjustment'],
+                          'collections': record['collections']}
+
+                score_row = models.ScoreTable(bibcode=record['bibcode'], 
+                                            scores=json.dumps(scores),
+                                            overrides_id = overrides_id,
+                                            models_id = models_id
+                                            ) 
+
+                # Check if EXACT record is already in the database
+                check_scores_query = session.query(models.ScoreTable).filter(models.ScoreTable.bibcode == record['bibcode'] and models.ScoreTable.scores == json.dumps(scores) and models.ScoreTable.overrides_id == overrides_id and models.ScoreTable.models_id == models_id).order_by(models.ScoreTable.created.desc()).first()
+
+            
+                # print('checkpoint001')
+                # import pdb; pdb.set_trace()
+
+                if check_scores_query is None:
+                    # Add record to score table
+                    session.add(score_row)
+                    session.commit()
+                    score_id = score_row.id
+
+                final_collections_row = models.FinalCollectionTable(bibcode = record['bibcode'], 
+                                                                        collection = final_collections,
+                                                                        score_id = score_row.id
+                                                                        )
 
 
+                # Check if EXACT final_collection record is already in the database
+                check_final_collection_query = session.query(models.FinalCollectionTable).filter(models.FinalCollectionTable.bibcode == record['bibcode'] and models.FinalCollectionTable.collection == final_collections and models.FinalCollectionTable.score_id == score_id).order_by(models.FinalCollectionTable.created.desc()).first()
+
+                if check_final_collection_query is None:
+                    session.add(final_collections_row)
+                    session.commit()
+
+                print('checkpoint002')
+                import pdb; pdb.set_trace()
+                
+            else:
+                print('Record is validated')
+                # pass
+
+                # Check if there is an override
+                check_overrides_query = session.query(models.OverrideTable).filter(models.OverrideTable.bibcode == record['bibcode'] and models.OverrideTable.override == record['override']).order_by(models.OverrideTable.created.desc()).first()
+
+                if check_overrides_query is None:
+                    override_row = models.OverrideTable(bibcode=record['bibcode'], override=record['override'])
+                    # import pdb; pdb.set_trace()
+                    session.add(override_row)
+                    session.commit()
+                    overrides_id = override_row.id
+
+                    update_scores_query = session.query(models.ScoreTable).filter(models.ScoreTable.bibcode == record['bibcode'] and models.ScoreTable.scores == json.dumps(scores)).order_by(models.ScoreTable.created.desc()).first()
+                    update_scores_query.overrides_id = overrides_id
+                    session.commit()
+
+                    update_final_collection_query = session.query(models.FinalCollectionTable).filter(models.FinalCollectionTable.bibcode == record['bibcode'] and models.FinalCollectionTable.collection == final_collections and models.FinalCollectionTable.score_id == score_id).order_by(models.FinalCollectionTable.created.desc()).first()
+
+                    update_final_collection_query.collection = record['override']
+                    session.commit()
+
+
+                print('checkpoint003')
+                import pdb; pdb.set_trace()
             # for c in claims:
             #     if isinstance(c, ClaimsLog):
             #         claim = c

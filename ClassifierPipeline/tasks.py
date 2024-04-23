@@ -91,12 +91,13 @@ def task_index_classified_record(message):
     """
     Update the database with the new classification
 
-
     :param message: contains the message inside the packet
         {
          'bibcode': String (19 chars),
          'collections': [String],
-         'abstract':String
+         'abstract':String,
+         'validate': Boolean,
+         'override': String
         }
     :return: no return
     """

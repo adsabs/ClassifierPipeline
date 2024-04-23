@@ -24,8 +24,8 @@ class ModelTable(Base):
     __tablename__ = 'models'
     id = Column(Integer, primary_key=True)
     model = Column(Text)
-    revision = Column(Text)
-    tokenizer = Column(Text)
+    # revision = Column(Text)
+    # tokenizer = Column(Text)
     postprocessing = Column(Text)
     # labels = Column(Text)
     created = Column(UTCDateTime, default=get_date)
@@ -34,12 +34,14 @@ class OverrideTable(Base):
     __tablename__ = 'overrides'
     id = Column(Integer, primary_key=True)
     # score_id = Column(Integer, ForeignKey('scores.id'))
+    bibcode = Column(String(19))
     override = Column(ARRAY(String))
     created = Column(UTCDateTime, default=get_date)
 
 class FinalCollectionTable(Base):
     __tablename__ = 'final_collection'
     id = Column(Integer, primary_key=True)
+    bibcode = Column(String(19))
     score_id = Column(Integer, ForeignKey('scores.id'))
     collection = Column(ARRAY(String))
     created = Column(UTCDateTime, default=get_date)
