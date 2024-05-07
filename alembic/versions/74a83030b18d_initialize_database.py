@@ -9,7 +9,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy import Column, Integer, ARRAY, String, Text
+from sqlalchemy import Column, Integer, ARRAY, String, Text, Boolean, Numeric, BigInteger
 from adsputils import get_date, UTCDateTime
 
 # revision identifiers, used by Alembic.
@@ -39,12 +39,26 @@ def upgrade() -> None:
                     Column('created', UTCDateTime, default=get_date()),
                     )
 
+    # Run table
+    op.create_table('run',
+                    Column('id', Integer, primary_key=True),
+                    Column('run',String(20)),
+                    Column('model_id', Integer, nullable=True),
+                    Column('created', UTCDateTime, default=get_date()),
+                    )
+    op.create_foreign_key('fk_model_id_run',
+                          'run',
+                          'models',
+                          ['model_id'],
+                          ['id'])
+
     #Scores table
     op.create_table('scores',
                     Column('id', Integer, primary_key=True),
                     Column('bibcode',String(19)),
                     Column('scores', Text),
-                    Column('overrides_id', Integer, nullable=True),
+                    Column('run_id', Integer),
+                    Column('overrides_id', BigInteger, nullable=True),
                     Column('models_id', Integer, nullable=True),
                     Column('created', UTCDateTime, default=get_date()),
                     )
@@ -53,11 +67,12 @@ def upgrade() -> None:
                           'overrides',
                           ['overrides_id'],
                           ['id'])
-    op.create_foreign_key('fk_models_id_scores',
+    op.create_foreign_key('fk_run_id_scores',
                           'scores',
-                          'models',
-                          ['models_id'],
+                          'run',
+                          ['run_id'],
                           ['id'])
+
 
 
     # Final Collection table
@@ -66,6 +81,7 @@ def upgrade() -> None:
                     Column('bibcode',String(19)),
                     Column('score_id', Integer),
                     Column('collection', ARRAY(String)),
+                    Column('validated', Boolean, default=False),
                     Column('created', UTCDateTime, default=get_date()),
                     )
     op.create_foreign_key('fk_score_id_final_collection',

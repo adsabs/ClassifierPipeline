@@ -2,7 +2,7 @@
 
 from builtins import str
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy import Column, Integer, String, Text, TIMESTAMP, ARRAY, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, TIMESTAMP, ARRAY, ForeignKey, Numeric, Boolean, BigInteger
 from sqlalchemy.types import Enum
 import json
 import sys
@@ -18,7 +18,7 @@ class ScoreTable(Base):
     scores = Column(Text)
     created = Column(UTCDateTime, default=get_date)
     overrides_id = Column(Integer, ForeignKey('overrides.id'))
-    models_id = Column(Integer, ForeignKey('models.id'))
+    run_id = Column(BigInteger, ForeignKey('run.id'))
 
 class ModelTable(Base):
     __tablename__ = 'models'
@@ -44,5 +44,14 @@ class FinalCollectionTable(Base):
     bibcode = Column(String(19))
     score_id = Column(Integer, ForeignKey('scores.id'))
     collection = Column(ARRAY(String))
+    # validated = Column(Enum('true', 'false'), default='false')
+    validated = Column(Boolean, default=False)
     created = Column(UTCDateTime, default=get_date)
+
+class RunTable(Base):
+    __tablename__ = 'run'
+    id = Column(Integer, primary_key=True)
+    run = Column(String(20))
+    created = Column(UTCDateTime, default=get_date)
+    model_id = Column(Integer, ForeignKey('models.id'))
 

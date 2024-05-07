@@ -14,7 +14,7 @@ import ClassifierPipeline.app as app_module
 # import datetime
 # from .classifier import score_record
 sys.path.append(os.path.abspath('../..'))
-from run import score_record, classify_record_from_scores
+from run import score_record, classify_record_from_scores, add_record_to_output_file
 
 from sqlalchemy.orm import scoped_session
 from sqlalchemy.orm import sessionmaker
@@ -82,6 +82,13 @@ def task_send_input_record_to_classifier(message):
     print('Collections: ')
     print(message['collections'])
 
+    # Write the classifications to output file
+    # add_record_to_output_file(message)
+    # may have add .async 
+    task_output_results(message)
+
+    # import pdb; pdb.set_trace()
+    # Write the new classification to the database
     task_index_classified_record(message)
 
     # import pdb; pdb.set_trace()
@@ -104,12 +111,27 @@ def task_index_classified_record(message):
 
     print('Indexing Classified Record')
     app.index_record(message)
-    import pdb; pdb.set_trace()
+    # import pdb; pdb.set_trace()
+    # pass
+
+def task_update_validated_records(message):
+    """
+    Update all records that have been validated that have same run_id
+
+    :param message: contains the message inside the packet
+        {
+         'run_id': Boolean,
+        }
+    """
+
+    print('Updating Validated Records')
+    app.update_validated_records(message)
+    # import pdb; pdb.set_trace()
     # pass
 
 
 # @app.task(queue="output-results")
-def task_output_results(msg):
+def task_output_results(message):
     """
     This worker will forward results to the outside
     exchange (typically an ADSImportPipeline) to be
@@ -123,7 +145,7 @@ def task_output_results(msg):
     :type: adsmsg.OrcidClaims
     :return: no return
     """
-    app.forward_message(msg)
+    add_record_to_output_file(message)
 
 
 

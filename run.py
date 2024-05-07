@@ -14,7 +14,7 @@
 import os
 import csv
 # import sys
-# import time
+import time
 # import json
 import argparse
 # import logging
@@ -34,7 +34,7 @@ from ClassifierPipeline import classifier, tasks
 
 # # ============================= INITIALIZATION ==================================== #
 
-from adsputils import setup_logging, load_config
+from adsputils import setup_logging, load_config, get_date
 proj_home = os.path.realpath(os.path.dirname(__file__))
 # global config
 config = load_config(proj_home=proj_home)
@@ -97,6 +97,13 @@ def load_model_and_tokenizer(pretrained_model_name_or_path=None, revision=None, 
 
     return model_dict
 
+def is_blank(s):
+    """ Check if a string is not None, not empty, and not only whitespace
+    Based on https://stackoverflow.com/questions/9573244/how-to-check-if-the-string-is-empty-in-python
+    """
+    # return bool(not s and s.isspace())
+    return not (s and not s.isspace())
+
 def prepare_records(records_path,validate=False):
     """
     Takes a path to a .csv file of records and converts each record into a
@@ -116,31 +123,77 @@ def prepare_records(records_path,validate=False):
     # Initial input columns: bibcode, title, abstract
     # Corrected input columns:
     # bibcode,title,abstract,categories,scores,collections,collection_scores,earth_science_adjustment,override
+    print('Processing records from: {}'.format(records_path))
+    print()
+
+    if validate is False:
+        run_name = get_date().strftime("%Y%m%d%H%M%S%f")
+        # output_path = records_path.replace('.csv', '_classified.tsv') 
+        output_path = records_path.replace('.csv', '_classified.csv') 
+        print('Preparing output file: {}'.format(output_path))
+        print()
+
+        prepare_output_file(output_path)
+        delimiter = ','
+    else:
+        delimiter = '\t'
+
     with open(records_path, 'r') as f: 
         csv_reader = csv.reader(f)
         headers = next(csv_reader)
 
+        # Add run ID to record data
+        # run_id = time.time() 
+        # validate all records with same run_id
+        # import pdb;pdb.set_trace()
+        if validate:
+            pass
+            run_name = None
+            # task.task_update_validated_records(records_path)
+        else:
+            pass
+            # run = get_date().strftime("%Y%m%d%H%M%S%f")
+            # run_id = int(get_date().strftime("%Y%m%d%H%M%S"))
+            # run_id = int(get_date().strftime("%Y%m%d%H"))
+
         for row in csv_reader:
             record = {}
             record['bibcode'] = row[0]
+            record['title'] = row[1]
+            record['abstract'] = row[2]
             record['text'] = row[1] + ' ' + row[2]
             record['validate'] = validate
 
             if validate:
-                record['override'] = row[8].split(',')
+                record['override'] = row[9].split(',')
+                run_name = row[3]
+                # For Testing
+                # Instead make a check of proper collections
+                # if is_allowed(record['override']):
+                #     tasks.task_index_classified_record(record)
+                if not is_blank(record['override'][0]):
+                    tasks.task_index_classified_record(record)
+                # For Production
+                # if not is_blank(record['override'][0]):
+                #     tasks.task_index_classified_record.delay(record)
             else:
                 record['override'] = None
-
-            # print('testing message')
-            # import pdb;pdb.set_trace()
-            # Now send record to classification queue
-            if validate:
-                tasks.task_index_classified_record(record)
-            else:
+                record['run_name'] = run_name
+                record['output_path'] = output_path
+                # import pdb;pdb.set_trace()
                 # For Testing
                 tasks.task_send_input_record_to_classifier(record)
                 # For Production
                 # tasks.task_send_input_record_to_classifier.delay(record)
+
+            # print('testing message')
+            # import pdb;pdb.set_trace()
+            # Now send record to classification queue
+        if validate:
+            tasks.task_update_validated_records(run_name)
+        # else:
+        #     pass
+
 
 
 def score_record(record):
@@ -244,7 +297,10 @@ def classify_record_from_scores(record):
 
     # Append collections to record
     record['collections'] = [category for category, threshold in zip(categories, meet_threshold) if threshold is True]
+    record['collection_scores'] = [score for score, threshold in zip(scores, meet_threshold) if threshold is True]
+    record['collection_scores'] = [round(score, 2) for score in record['collection_scores']]
     record['earth_science_adjustment'] = config['ADDITIONAL_EARTH_SCIENCE_PROCESSING']
+
 
     return record
 
@@ -255,6 +311,31 @@ def index_record():
     """
     pass
 
+def prepare_output_file(output_path):
+    """
+    Prepares an output file
+    """
+
+    # header = 'bibcode,title,abstract,run_id,categories,scores,collections,collection_scores,earth_science_adjustment,override\n'
+    header = ['bibcode','title','abstract','run_id','categories','scores','collections','collection_scores','earth_science_adjustment','override']
+
+    with open(output_path, 'w', newline='') as file:
+        # writer = csv.writer(file, delimiter='\t')
+        writer = csv.writer(file)
+        writer.writerow(header)
+        # file.write('\t'.join(header) + '\n')
+
+def add_record_to_output_file(record):
+    """
+    Adds a record to the output
+    """
+    #bibcode    title   abstract    categories  scores  collections collection_scores   earth_science_adjustment    run_id  override
+    row = [record['bibcode'], record['title'], record['abstract'],record['run_name'], ', '.join(record['categories']), ', '.join(map(str,record['scores'])), ', '.join(record['collections']), ', '.join(map(str, record['collection_scores'])), record['earth_science_adjustment'], '']
+
+    with open(record['output_path'], 'a', newline='') as file:
+        # writer = csv.writer(file, delimiter='\t')
+        writer = csv.writer(file)
+        writer.writerow(row)
 
 # =============================== MAIN ======================================= #
 
@@ -287,6 +368,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
+    # import pdb;pdb.set_trace()
 
     if args.records:
         records_path = args.records
