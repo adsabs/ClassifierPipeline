@@ -85,7 +85,7 @@ def task_send_input_record_to_classifier(message):
     # Write the classifications to output file
     # add_record_to_output_file(message)
     # may have add .async 
-    task_output_results(message)
+    # task_output_results(message)
 
     # import pdb; pdb.set_trace()
     # Write the new classification to the database

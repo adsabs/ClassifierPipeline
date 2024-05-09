@@ -15,8 +15,9 @@ from adsputils import get_date, ADSCelery, u2asc
 from contextlib import contextmanager
 # from dateutil.tz import tzutc
 # from sqlalchemy import and_
-from sqlalchemy import create_engine, desc
+from sqlalchemy import create_engine, desc, and_
 from sqlalchemy.orm import scoped_session, sessionmaker
+from ClassifierPipeline import tasks
 # import cachetools
 # import datetime
 # import os
@@ -93,6 +94,12 @@ class SciXClassifierCelery(ADSCelery):
 
         # print('checkpoint001')
         # import pdb; pdb.set_trace()
+
+
+        # scores = {'scores': {cat:score for cat, score in zip(record['categories'], record['scores'])},
+        #                   'earth_science_adjustment': record['earth_science_adjustment'],
+        #                   'collections': record['collections']}
+
         with self.session_scope() as session:
 
             if record['validate'] is False:
@@ -105,7 +112,7 @@ class SciXClassifierCelery(ADSCelery):
                                               )
 
                 # Check if model is already in the database
-                check_model_query = session.query(models.ModelTable).filter(models.ModelTable.model == json.dumps(record['model']) and models.ModelTable.postprocessing == json.dumps(record['postprocessing'])).order_by(models.ModelTable.created.desc()).first()
+                check_model_query = session.query(models.ModelTable).filter(and_(models.ModelTable.model == json.dumps(record['model']), models.ModelTable.postprocessing == json.dumps(record['postprocessing']))).order_by(models.ModelTable.created.desc()).first()
 
                 # import pdb; pdb.set_trace()
                 if check_model_query is None:
@@ -116,21 +123,33 @@ class SciXClassifierCelery(ADSCelery):
                     models_id = check_model_query.id
 
                 # Run Table
-                run_row = models.RunTable(model_id=models_id,
-                                          run=record['run_name']
+                run_row = models.RunTable(model_id=models_id#,
+                                          # run=record['run_name']
                                           )
 
                 # Check if run is already in the database
-                check_run_query = session.query(models.RunTable).filter(models.RunTable.run == record['run_name'] and models.RunTable.model_id == models_id).order_by(models.RunTable.created.desc()).first()
+                # check_run_query = session.query(models.RunTable).filter(models.RunTable.run == record['run_name'] and models.RunTable.model_id == models_id).order_by(models.RunTable.created.desc()).first()
 
-                if check_run_query is not None:
-                    run_id = check_run_query.id
-                else:
+                # if check_run_query is not None:
+                #     run_id = check_run_query.id
+                # else:
+                #     session.add(run_row)
+                #     session.commit()
+                #     run_id = run_row.id
+
+                # import pdb; pdb.set_trace()
+                if record['bibcode'] == record['run_bibcode']:
                     session.add(run_row)
                     session.commit()
                     run_id = run_row.id
+                else:
+                    run_query = session.query(models.ScoreTable).filter(models.ScoreTable.bibcode == record['run_bibcode']).order_by(models.ScoreTable.created.desc()).first()
+                    run_id = run_query.run_id
+
+                record['run_id'] = run_id
 
                 
+                # import pdb; pdb.set_trace()
                 # Check if there is an override
                 check_overrides_query = session.query(models.OverrideTable).filter(models.OverrideTable.bibcode == record['bibcode']).order_by(models.OverrideTable.created.desc()).first()
 
@@ -159,40 +178,52 @@ class SciXClassifierCelery(ADSCelery):
 
                 # Check if EXACT record is already in the database
                 # check_scores_query = session.query(models.ScoreTable).filter(models.ScoreTable.bibcode == record['bibcode'] and models.ScoreTable.scores == json.dumps(scores) and models.ScoreTable.overrides_id == overrides_id and models.ScoreTable.models_id == models_id).order_by(models.ScoreTable.created.desc()).first()
-                check_scores_query = session.query(models.ScoreTable).filter(models.ScoreTable.bibcode == record['bibcode'] and models.ScoreTable.scores == json.dumps(scores) and models.ScoreTable.overrides_id == overrides_id and models.ScoreTable.run_id == run_id).order_by(models.ScoreTable.created.desc()).first()
+                check_scores_query = session.query(models.ScoreTable).filter(and_(models.ScoreTable.bibcode == record['bibcode'], models.ScoreTable.scores == json.dumps(scores), models.ScoreTable.overrides_id == overrides_id, models.ScoreTable.run_id == run_id)).order_by(models.ScoreTable.created.desc()).first()
+                # check_scores_query = session.query(models.ScoreTable).filter(and_(models.ScoreTable.bibcode == record['bibcode'], models.ScoreTable.scores == json.dumps(scores))).order_by(models.ScoreTable.created.desc()).first()
+
+                # check_scores_query = session.query(models.ScoreTable).filter( and_(models.ScoreTable.bibcode == record['bibcode'], models.ScoreTable.run_id == run_id)).order_by(models.ScoreTable.created.desc()).first()
 
             
                 # print('checkpoint001')
                 # import pdb; pdb.set_trace()
 
+                # import pdb; pdb.set_trace()
                 if check_scores_query is None:
                     # Add record to score table
                     session.add(score_row)
                     session.commit()
                     score_id = score_row.id
 
+                # import pdb; pdb.set_trace()
                 final_collections_row = models.FinalCollectionTable(bibcode = record['bibcode'], 
                                                                         collection = final_collections,
                                                                         score_id = score_row.id
                                                                         )
 
 
+                # Check if there is an override
+                # check_overrides_query = session.query(models.OverrideTable).filter(models.OverrideTable.bibcode == record['bibcode']])).order_by(models.OverrideTable.created.desc()).first()
                 # Check if EXACT final_collection record is already in the database
-                check_final_collection_query = session.query(models.FinalCollectionTable).filter(models.FinalCollectionTable.bibcode == record['bibcode'] and models.FinalCollectionTable.collection == final_collections and models.FinalCollectionTable.score_id == score_id).order_by(models.FinalCollectionTable.created.desc()).first()
+                # check_final_collection_query = session.query(models.FinalCollectionTable).filter(and_(models.FinalCollectionTable.bibcode == record['bibcode'], models.FinalCollectionTable.collection == final_collections, models.FinalCollectionTable.score_id == score_id)).order_by(models.FinalCollectionTable.created.desc()).first()
+                check_final_collection_query = session.query(models.FinalCollectionTable).filter(models.FinalCollectionTable.bibcode == record['bibcode']).order_by(models.FinalCollectionTable.created.desc()).first()
 
                 if check_final_collection_query is None:
                     session.add(final_collections_row)
                     session.commit()
+                if check_final_collection_query is not None:
+                    check_final_collection_query.final_collection = final_collections
+                    session.commit()
 
                 # print('checkpoint002')
                 # import pdb; pdb.set_trace()
+                tasks.task_output_results(record)
                 
             else:
                 print('Record is validated')
                 # pass
 
                 # Check if there is an override
-                check_overrides_query = session.query(models.OverrideTable).filter(models.OverrideTable.bibcode == record['bibcode'] and models.OverrideTable.override == record['override']).order_by(models.OverrideTable.created.desc()).first()
+                check_overrides_query = session.query(models.OverrideTable).filter(and_(models.OverrideTable.bibcode == record['bibcode'], models.OverrideTable.override == record['override'])).order_by(models.OverrideTable.created.desc()).first()
 
                 if check_overrides_query is None:
                     override_row = models.OverrideTable(bibcode=record['bibcode'], override=record['override'])
@@ -201,11 +232,17 @@ class SciXClassifierCelery(ADSCelery):
                     session.commit()
                     overrides_id = override_row.id
 
-                    update_scores_query = session.query(models.ScoreTable).filter(models.ScoreTable.bibcode == record['bibcode'] and models.ScoreTable.scores == json.dumps(scores)).order_by(models.ScoreTable.created.desc()).first()
-                    update_scores_query.overrides_id = overrides_id
-                    session.commit()
+                    # update_scores_query = session.query(models.ScoreTable).filter(and_(models.ScoreTable.bibcode == record['bibcode'], models.ScoreTable.scores == json.dumps(scores))).order_by(models.ScoreTable.created.desc()).first()
+                    update_scores_query = session.query(models.ScoreTable).filter(models.ScoreTable.bibcode == record['bibcode']).order_by(models.ScoreTable.created.desc()).all()
+                    # import pdb; pdb.set_trace()
+                    for element in update_scores_query:
+                        element.overrides_id = overrides_id
+                        session.commit()
+                    # update_scores_query.overrides_id = overrides_id
+                    # session.commit()
 
-                    update_final_collection_query = session.query(models.FinalCollectionTable).filter(models.FinalCollectionTable.bibcode == record['bibcode'] and models.FinalCollectionTable.collection == final_collections and models.FinalCollectionTable.score_id == score_id).order_by(models.FinalCollectionTable.created.desc()).first()
+                    # update_final_collection_query = session.query(models.FinalCollectionTable).filter(and_(models.FinalCollectionTable.bibcode == record['bibcode'], models.FinalCollectionTable.collection == final_collections, models.FinalCollectionTable.score_id == score_id)).order_by(models.FinalCollectionTable.created.desc()).first()
+                    update_final_collection_query = session.query(models.FinalCollectionTable).filter(models.FinalCollectionTable.bibcode == record['bibcode']).order_by(models.FinalCollectionTable.created.desc()).first()
 
                     update_final_collection_query.collection = record['override']
                     update_final_collection_query.validated = record['validate']
@@ -227,18 +264,21 @@ class SciXClassifierCelery(ADSCelery):
         # return res
 
 
-    def update_validated_records(self, run_name):
+    # def update_validated_records(self, run_name):
+    def update_validated_records(self, run_id):
         """
         Updates validated records in the database
 
         :param: run_id- Boolean
         :return: boolean - whether update successful
         """
-        print(f'Updating run_id: {run_name}')
+        print(f'Updating run_id: {run_id}')
 
+        # import pdb; pdb.set_trace()
         with self.session_scope() as session:
 
-            run_query = session.query(models.RunTable).filter(models.RunTable.run == run_name).first()
+            # run_query = session.query(models.RunTable).filter(models.RunTable.run == run_name).first()
+            run_query = session.query(models.RunTable).filter(models.RunTable.id == run_id).first()
 
             if run_query is not None:
 
@@ -246,7 +286,7 @@ class SciXClassifierCelery(ADSCelery):
 
                 for record in run_id_query:
 
-                    update_final_collection_query = session.query(models.FinalCollectionTable).filter(models.FinalCollectionTable.bibcode == record.bibcode and models.FinalCollectionTable.validated == True).order_by(models.FinalCollectionTable.created.desc()).first()
+                    update_final_collection_query = session.query(models.FinalCollectionTable).filter(and_(models.FinalCollectionTable.bibcode == record.bibcode, models.FinalCollectionTable.validated == False)).order_by(models.FinalCollectionTable.created.desc()).first()
 
                     if update_final_collection_query is not None:
                         update_final_collection_query.validated = True

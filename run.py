@@ -127,7 +127,7 @@ def prepare_records(records_path,validate=False):
     print()
 
     if validate is False:
-        run_name = get_date().strftime("%Y%m%d%H%M%S%f")
+        # run_name = get_date().strftime("%Y%m%d%H%M%S%f")
         # output_path = records_path.replace('.csv', '_classified.tsv') 
         output_path = records_path.replace('.csv', '_classified.csv') 
         print('Preparing output file: {}'.format(output_path))
@@ -148,7 +148,7 @@ def prepare_records(records_path,validate=False):
         # import pdb;pdb.set_trace()
         if validate:
             pass
-            run_name = None
+            # run_id = None
             # task.task_update_validated_records(records_path)
         else:
             pass
@@ -156,17 +156,24 @@ def prepare_records(records_path,validate=False):
             # run_id = int(get_date().strftime("%Y%m%d%H%M%S"))
             # run_id = int(get_date().strftime("%Y%m%d%H"))
 
+        run_bibcode = None
+        is_first_row = True
         for row in csv_reader:
+            if is_first_row:
+                run_bibcode = row[0]
+                is_first_row = False
+
             record = {}
             record['bibcode'] = row[0]
             record['title'] = row[1]
             record['abstract'] = row[2]
             record['text'] = row[1] + ' ' + row[2]
             record['validate'] = validate
+            record['run_bibcode'] = run_bibcode
 
             if validate:
                 record['override'] = row[9].split(',')
-                run_name = row[3]
+                run_id = row[3]
                 # For Testing
                 # Instead make a check of proper collections
                 # if is_allowed(record['override']):
@@ -178,7 +185,7 @@ def prepare_records(records_path,validate=False):
                 #     tasks.task_index_classified_record.delay(record)
             else:
                 record['override'] = None
-                record['run_name'] = run_name
+                # record['run_name'] = run_name
                 record['output_path'] = output_path
                 # import pdb;pdb.set_trace()
                 # For Testing
@@ -190,7 +197,7 @@ def prepare_records(records_path,validate=False):
             # import pdb;pdb.set_trace()
             # Now send record to classification queue
         if validate:
-            tasks.task_update_validated_records(run_name)
+            tasks.task_update_validated_records(run_id)
         # else:
         #     pass
 
@@ -330,7 +337,7 @@ def add_record_to_output_file(record):
     Adds a record to the output
     """
     #bibcode    title   abstract    categories  scores  collections collection_scores   earth_science_adjustment    run_id  override
-    row = [record['bibcode'], record['title'], record['abstract'],record['run_name'], ', '.join(record['categories']), ', '.join(map(str,record['scores'])), ', '.join(record['collections']), ', '.join(map(str, record['collection_scores'])), record['earth_science_adjustment'], '']
+    row = [record['bibcode'], record['title'], record['abstract'],record['run_id'], ', '.join(record['categories']), ', '.join(map(str,record['scores'])), ', '.join(record['collections']), ', '.join(map(str, record['collection_scores'])), record['earth_science_adjustment'], '']
 
     with open(record['output_path'], 'a', newline='') as file:
         # writer = csv.writer(file, delimiter='\t')
