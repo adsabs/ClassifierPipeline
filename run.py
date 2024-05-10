@@ -28,7 +28,8 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 # from adsputils import get_date
 # from adsmsg import OrcidClaims
-from ClassifierPipeline import classifier, tasks
+from ClassifierPipeline import classifier, tasks, app
+# from ClassifierPipeline import classifier, tasks
 # from ADSOrcid import updater, tasks
 # from ADSOrcid.models import ClaimsLog, KeyValue, Records, AuthorInfo
 
@@ -42,7 +43,15 @@ logger = setup_logging('run.py', proj_home=proj_home,
                         level=config.get('LOGGING_LEVEL', 'INFO'),
                         attach_stdout=config.get('LOG_STDOUT', False))
 
+# app = app_module.SciXClassifierCelery(
+app = app.SciXClassifierCelery(
+        # app = SciXClassifierCelery(
+    "scixclassifier-pipeline",
+    proj_home=proj_home,
+    local_config=globals().get("local_config", {}),
+    )
 # app = tasks.app
+# app = SciXClassifierCelery()
 
 # =============================== FUNCTIONS ======================================= #
 
@@ -104,7 +113,7 @@ def is_blank(s):
     # return bool(not s and s.isspace())
     return not (s and not s.isspace())
 
-def prepare_records(records_path,validate=False):
+def prepare_records(records_path,validate=False, tsv_output=True):
     """
     Takes a path to a .csv file of records and converts each record into a
     dictionary with the following keys: bibcode and text (a combination of 
@@ -128,48 +137,42 @@ def prepare_records(records_path,validate=False):
 
     if validate is False:
         # run_name = get_date().strftime("%Y%m%d%H%M%S%f")
-        # output_path = records_path.replace('.csv', '_classified.tsv') 
-        output_path = records_path.replace('.csv', '_classified.csv') 
+        if tsv_output:
+            output_path = records_path.replace('.csv', '_classified.tsv') 
+        else:
+            output_path = records_path.replace('.csv', '_classified.csv') 
+
         print('Preparing output file: {}'.format(output_path))
         print()
 
-        prepare_output_file(output_path)
+        prepare_output_file(output_path,tsv_output=tsv_output)
+
         delimiter = ','
     else:
         delimiter = '\t'
 
     with open(records_path, 'r') as f: 
-        csv_reader = csv.reader(f)
+        csv_reader = csv.reader(f, delimiter=delimiter)
         headers = next(csv_reader)
 
         # Add run ID to record data
         # run_id = time.time() 
         # validate all records with same run_id
         # import pdb;pdb.set_trace()
-        if validate:
-            pass
-            # run_id = None
-            # task.task_update_validated_records(records_path)
+        if not validate:
+            run_id = app.index_run()
         else:
-            pass
-            # run = get_date().strftime("%Y%m%d%H%M%S%f")
-            # run_id = int(get_date().strftime("%Y%m%d%H%M%S"))
-            # run_id = int(get_date().strftime("%Y%m%d%H"))
+            run_id = None
 
-        run_bibcode = None
-        is_first_row = True
         for row in csv_reader:
-            if is_first_row:
-                run_bibcode = row[0]
-                is_first_row = False
-
             record = {}
             record['bibcode'] = row[0]
             record['title'] = row[1]
             record['abstract'] = row[2]
             record['text'] = row[1] + ' ' + row[2]
             record['validate'] = validate
-            record['run_bibcode'] = run_bibcode
+            record['run_id'] = run_id
+            record['tsv_output'] = tsv_output
 
             if validate:
                 record['override'] = row[9].split(',')
@@ -318,7 +321,7 @@ def index_record():
     """
     pass
 
-def prepare_output_file(output_path):
+def prepare_output_file(output_path,tsv_output=True):
     """
     Prepares an output file
     """
@@ -327,8 +330,10 @@ def prepare_output_file(output_path):
     header = ['bibcode','title','abstract','run_id','categories','scores','collections','collection_scores','earth_science_adjustment','override']
 
     with open(output_path, 'w', newline='') as file:
-        # writer = csv.writer(file, delimiter='\t')
-        writer = csv.writer(file)
+        if tsv_output:
+            writer = csv.writer(file, delimiter='\t')
+        else:
+            writer = csv.writer(file)
         writer.writerow(header)
         # file.write('\t'.join(header) + '\n')
 
@@ -340,8 +345,10 @@ def add_record_to_output_file(record):
     row = [record['bibcode'], record['title'], record['abstract'],record['run_id'], ', '.join(record['categories']), ', '.join(map(str,record['scores'])), ', '.join(record['collections']), ', '.join(map(str, record['collection_scores'])), record['earth_science_adjustment'], '']
 
     with open(record['output_path'], 'a', newline='') as file:
-        # writer = csv.writer(file, delimiter='\t')
-        writer = csv.writer(file)
+        if record['tsv_output']:
+            writer = csv.writer(file, delimiter='\t')
+        else:
+            writer = csv.writer(file)
         writer.writerow(row)
 
 # =============================== MAIN ======================================= #

@@ -56,10 +56,25 @@ class SciXClassifierCelery(ADSCelery):
 
     # def __init__(self, *args, **kwargs):
     #     pass
+    def index_run(self):
+        """
+        Indexes a run into a database
+
+        :param: none 
+        :return: run_id - id of the run
+        """
+        with self.session_scope() as session:
+
+            run_row = models.RunTable()
+
+            session.add(run_row)
+            session.commit()
+
+            return run_row.id
 
     def index_record(self, record):
         """
-        Sasves a record into a database
+        Saves a record into a database
 
         :param: record- dictionar
         :return: boolean - whether record successfuly added
@@ -118,35 +133,42 @@ class SciXClassifierCelery(ADSCelery):
                 if check_model_query is None:
                     session.add(model_row)
                     session.commit()
-                    models_id = model_row.id
+                    model_id = model_row.id
                 else:
-                    models_id = check_model_query.id
+                    model_id = check_model_query.id
 
                 # Run Table
-                run_row = models.RunTable(model_id=models_id#,
+                # run_row = models.RunTable(model_id=models_id#,
                                           # run=record['run_name']
-                                          )
+                                          # )
 
                 # Check if run is already in the database
                 # check_run_query = session.query(models.RunTable).filter(models.RunTable.run == record['run_name'] and models.RunTable.model_id == models_id).order_by(models.RunTable.created.desc()).first()
+                check_run_query = session.query(models.RunTable).filter(models.RunTable.id == record['run_id']).order_by(models.RunTable.created.desc()).first()
 
-                # if check_run_query is not None:
-                #     run_id = check_run_query.id
+                # import pdb; pdb.set_trace()
+                if check_run_query is not None:
+
+                    # run_id = check_run_query.id
+                    if check_run_query.model_id != model_id:
+                        check_run_query.model_id = model_id 
+                        session.commit()
+                # import pdb; pdb.set_trace()
                 # else:
                 #     session.add(run_row)
                 #     session.commit()
                 #     run_id = run_row.id
 
                 # import pdb; pdb.set_trace()
-                if record['bibcode'] == record['run_bibcode']:
-                    session.add(run_row)
-                    session.commit()
-                    run_id = run_row.id
-                else:
-                    run_query = session.query(models.ScoreTable).filter(models.ScoreTable.bibcode == record['run_bibcode']).order_by(models.ScoreTable.created.desc()).first()
-                    run_id = run_query.run_id
+                # if record['bibcode'] == record['run_bibcode']:
+                    # session.add(run_row)
+                    # session.commit()
+                    # run_id = run_row.id
+                # else:
+                    # run_query = session.query(models.ScoreTable).filter(models.ScoreTable.bibcode == record['run_bibcode']).order_by(models.ScoreTable.created.desc()).first()
+                    # run_id = run_query.run_id
 
-                record['run_id'] = run_id
+                # record['run_id'] = run_id
 
                 
                 # import pdb; pdb.set_trace()
@@ -173,12 +195,12 @@ class SciXClassifierCelery(ADSCelery):
                                             overrides_id = overrides_id,
                                             # models_id = models_id,
                                             # run_id = record['run_id']
-                                            run_id = run_id
+                                            run_id = record['run_id']
                                             ) 
 
                 # Check if EXACT record is already in the database
                 # check_scores_query = session.query(models.ScoreTable).filter(models.ScoreTable.bibcode == record['bibcode'] and models.ScoreTable.scores == json.dumps(scores) and models.ScoreTable.overrides_id == overrides_id and models.ScoreTable.models_id == models_id).order_by(models.ScoreTable.created.desc()).first()
-                check_scores_query = session.query(models.ScoreTable).filter(and_(models.ScoreTable.bibcode == record['bibcode'], models.ScoreTable.scores == json.dumps(scores), models.ScoreTable.overrides_id == overrides_id, models.ScoreTable.run_id == run_id)).order_by(models.ScoreTable.created.desc()).first()
+                check_scores_query = session.query(models.ScoreTable).filter(and_(models.ScoreTable.bibcode == record['bibcode'], models.ScoreTable.scores == json.dumps(scores), models.ScoreTable.overrides_id == overrides_id, models.ScoreTable.run_id == record['run_id'])).order_by(models.ScoreTable.created.desc()).first()
                 # check_scores_query = session.query(models.ScoreTable).filter(and_(models.ScoreTable.bibcode == record['bibcode'], models.ScoreTable.scores == json.dumps(scores))).order_by(models.ScoreTable.created.desc()).first()
 
                 # check_scores_query = session.query(models.ScoreTable).filter( and_(models.ScoreTable.bibcode == record['bibcode'], models.ScoreTable.run_id == run_id)).order_by(models.ScoreTable.created.desc()).first()
