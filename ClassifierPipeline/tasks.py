@@ -53,8 +53,25 @@ app = app_module.SciXClassifierCelery(
 # Query SOLR
 #   - Finding records with given set of parameters (e.g. classification, model, etc.)
 
+@app.task(queue="update-record")
+# def task_handle_input_from_master(message):
+def task_update_record(message):
+    """
+    Handle the input from the master
+
+    :param message: contains the message inside the packet
+        {
+         'bibcode': String (19 chars),
+         'title': String,
+         'abstract':String
+        }
+    :return: no return
+    """
+    message = app.handle_input_from_master(message)
+
 
 # @app.task(queue="unclassified-queue")
+@app.task(queue="classify-record")
 def task_send_input_record_to_classifier(message):
     """
     Send a new record to the classifier
@@ -94,6 +111,7 @@ def task_send_input_record_to_classifier(message):
     # import pdb; pdb.set_trace()
 
 
+@app.task(queue="classify-record")
 def task_index_classified_record(message):
     """
     Update the database with the new classification
@@ -114,6 +132,7 @@ def task_index_classified_record(message):
     # import pdb; pdb.set_trace()
     # pass
 
+@app.task(queue="classify-record")
 def task_update_validated_records(message):
     """
     Update all records that have been validated that have same run_id
@@ -131,6 +150,7 @@ def task_update_validated_records(message):
 
 
 # @app.task(queue="output-results")
+@app.task(queue="classify-record")
 def task_output_results(message):
     """
     This worker will forward results to the outside

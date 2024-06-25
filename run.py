@@ -23,7 +23,7 @@ import argparse
 # from urllib3 import exceptions
 # warnings.simplefilter('ignore', exceptions.InsecurePlatformWarning)
 
-import pandas as pd
+# import pandas as pd
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 # from adsputils import get_date
@@ -32,6 +32,9 @@ from ClassifierPipeline import classifier, tasks, app
 # from ClassifierPipeline import classifier, tasks
 # from ADSOrcid import updater, tasks
 # from ADSOrcid.models import ClaimsLog, KeyValue, Records, AuthorInfo
+
+import classifyrecord_pb2
+from google.protobuf.json_format import Parse
 
 # # ============================= INITIALIZATION ==================================== #
 
@@ -379,6 +382,13 @@ if __name__ == '__main__':
                         help='Path to comma delimited list of new records' +
                              'to process: columns: bibcode, title, abstract')
 
+    parser.add_argument('-t',
+                        '--test',
+                        dest='test',
+                        action='store_true',
+                        help='Run tests')
+
+
 
     args = parser.parse_args()
 
@@ -407,6 +417,20 @@ if __name__ == '__main__':
             # print("Categories: {}".format(record['categories']))
             # print("Scores: {}".format(record['scores']))
         # records = classify_records_from_scores(records)
+
+    if args.test:
+        print("Running tests")
+
+        # Read a protobuf from a
+        with open('ClassifierPipeline/tests/stub_data/classifier_request.json', 'r') as f:
+            message_json = f.read()
+        
+        message = classifyrecord_pb2.ClassifyRequestRecordList()
+        Parse(message_json, message)
+        
+        message = app.handle_input_from_master(message)
+
+        # import pdb;pdb.set_trace
 
     print("Done")
     import pdb;pdb.set_trace()

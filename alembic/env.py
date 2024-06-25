@@ -47,9 +47,9 @@ def get_app_config(key):
     opath = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
     if opath not in sys.path:
         sys.path.insert(0, opath)
-        
+
     from ClassifierPipeline.tasks import app
-    
+
     print('Getting actual config for', key, app.conf.get(key))
     return app.conf.get(key)
 
@@ -61,10 +61,11 @@ def run_migrations_online():
 
     """
     cfg = config.get_section(config.config_ini_section)
+    print(cfg)
     if 'use_flask_db_url' in cfg and cfg['use_flask_db_url'] == 'true':
         cfg['sqlalchemy.url'] = get_app_config('SQLALCHEMY_URL')
-    
-    
+
+
     engine = engine_from_config(
                 cfg,
                 prefix='sqlalchemy.',

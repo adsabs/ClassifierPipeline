@@ -213,98 +213,6 @@ class SciXClassifierCelery(ADSCelery):
 
 
 
-    def prepare_records(records_path,validate=False, tsv_output=True):
-        """
-        Takes a path to a .csv file of records and converts each record into a
-        dictionary with the following keys: bibcode and text (a combination of 
-        title and abstract). Sends each record to the classification queue.
-
-        Parameters
-        ----------
-        records_path : str (required) (default=None) Path to a .csv file of records
-
-        Returns
-        -------
-        no return
-        """
-        # Open .csv file and read in records
-        # Note: that this method requres the input file to have the following
-        # Initial input columns: bibcode, title, abstract
-        # Corrected input columns:
-        # bibcode,title,abstract,categories,scores,collections,collection_scores,earth_science_adjustment,override
-        print('Processing records from: {}'.format(records_path))
-        print()
-
-        if validate is False:
-            # run_name = get_date().strftime("%Y%m%d%H%M%S%f")
-            if tsv_output:
-                output_path = records_path.replace('.csv', '_classified.tsv') 
-            else:
-                output_path = records_path.replace('.csv', '_classified.csv') 
-
-            print('Preparing output file: {}'.format(output_path))
-            print()
-
-            prepare_output_file(output_path,tsv_output=tsv_output)
-
-            delimiter = ','
-        else:
-            delimiter = '\t'
-
-        with open(records_path, 'r') as f: 
-            csv_reader = csv.reader(f, delimiter=delimiter)
-            headers = next(csv_reader)
-
-            # Add run ID to record data
-            # run_id = time.time() 
-            # validate all records with same run_id
-            # import pdb;pdb.set_trace()
-            if not validate:
-                run_id = app.index_run()
-            else:
-                run_id = None
-
-            for row in csv_reader:
-                record = {}
-                record['bibcode'] = row[0]
-                record['title'] = row[1]
-                record['abstract'] = row[2]
-                record['text'] = row[1] + ' ' + row[2]
-                record['validate'] = validate
-                record['run_id'] = run_id
-                record['tsv_output'] = tsv_output
-
-                if validate:
-                    record['override'] = row[9].split(',')
-                    run_id = row[3]
-                    # For Testing
-                    # Instead make a check of proper collections
-                    # if is_allowed(record['override']):
-                    #     tasks.task_index_classified_record(record)
-                    if not is_blank(record['override'][0]):
-                        tasks.task_index_classified_record(record)
-                    # For Production
-                    # if not is_blank(record['override'][0]):
-                    #     tasks.task_index_classified_record.delay(record)
-                else:
-                    record['override'] = None
-                    # record['run_name'] = run_name
-                    record['output_path'] = output_path
-                    # import pdb;pdb.set_trace()
-                    # For Testing
-                    tasks.task_send_input_record_to_classifier(record)
-                    # For Production
-                    # tasks.task_send_input_record_to_classifier.delay(record)
-
-                # print('testing message')
-                # import pdb;pdb.set_trace()
-                # Now send record to classification queue
-            if validate:
-                tasks.task_update_validated_records(run_id)
-            # else:
-            #     pass
-
-
     def score_record(self, record):
         """
         Provide classification scores for a record using the following
@@ -445,7 +353,7 @@ class SciXClassifierCelery(ADSCelery):
             writer.writerow(row)
 
 
-    def task_handle_input(self, message): 
+    def handle_input_from_master(self, message): 
         """
         Handles input for the task
         This handles input from master checks if input is single bibcode or batch of bibcodes
@@ -456,6 +364,7 @@ class SciXClassifierCelery(ADSCelery):
         """
 
         # Check if input is single bibcode or path to file of bibcodes, title and abstracts
+        import pdb;pdb.set_trace()
 
         # If single bibcode
         # if 'bibcode' in message.keys():
@@ -467,14 +376,14 @@ class SciXClassifierCelery(ADSCelery):
                       'abstract': message['abstract'],
                       'text': message['title'] + ' ' + message['abstract']
                       }
-            record = score_record(record)
-            record = classify_record_from_scores(record)
-            index_record(record)
+            tasks.task_send_input_record_to_classifier(record)
 
         # If batch of bibcodes
         # if 'filename' in message.keys():
-        if message is type(list):
+        if message is type('classifyrecord_pb2.ClassifyRequestRecordList'):
+        # if message is type(list):
             # print('Batch of bibcodes')
+            import pdb;pdb.set_trace()
             prepare_batch_from_master(message)
 
     def index_run(self):
