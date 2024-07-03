@@ -418,8 +418,13 @@ if __name__ == '__main__':
             # print("Scores: {}".format(record['scores']))
         # records = classify_records_from_scores(records)
 
+    import pdb;pdb.set_trace
     if args.test:
         print("Running tests")
+        print('more tests')
+        print('even more')
+        # import pdb;pdb.set_trace
+        # import pdb;pdb.set_trace
 
         # Read a protobuf from a
         with open('ClassifierPipeline/tests/stub_data/classifier_request.json', 'r') as f:
@@ -428,9 +433,10 @@ if __name__ == '__main__':
         message = classifyrecord_pb2.ClassifyRequestRecordList()
         Parse(message_json, message)
         
+        # import pdb;pdb.set_trace
         message = app.handle_input_from_master(message)
 
         # import pdb;pdb.set_trace
 
     print("Done")
-    import pdb;pdb.set_trace()
+    # import pdb;pdb.set_trace()

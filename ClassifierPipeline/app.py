@@ -2,6 +2,7 @@ import os
 import json
 import pickle
 import zlib
+import csv
 
 # from builtins import str
 # from .models import ClaimsLog, Records, AuthorInfo, ChangeLog
@@ -17,13 +18,20 @@ from contextlib import contextmanager
 # from sqlalchemy import and_
 from sqlalchemy import create_engine, desc, and_
 from sqlalchemy.orm import scoped_session, sessionmaker
-from ClassifierPipeline import tasks
+from ClassifierPipeline import tasks, classifier
 # import cachetools
 # import datetime
 # import os
 # import random
 # import time
 # import traceback
+from adsputils import load_config
+# from adsmg import ClassifyRequestRecord, ClassifyRequestRecordList
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+
+# from google.protobuf.json_format import MessageToDict
+import classifyrecord_pb2
+from google.protobuf.json_format import Parse
 
 proj_home = os.path.realpath(os.path.join(os.path.dirname(__file__), "../"))
 # global objects; we could make them belong to the app object but it doesn't seem necessary
@@ -32,7 +40,7 @@ proj_home = os.path.realpath(os.path.join(os.path.dirname(__file__), "../"))
 # orcid_cache = cachetools.TTLCache(maxsize=1024, ttl=3600, timer=time.time, missing=None, getsizeof=None)
 # ads_cache = cachetools.TTLCache(maxsize=1024, ttl=3600, timer=time.time, missing=None, getsizeof=None)
 # bibcode_cache = cachetools.TTLCache(maxsize=2048, ttl=3600, timer=time.time, missing=None, getsizeof=None)
-
+config = load_config(proj_home=proj_home)
 # ALLOWED_STATUS = set(['claimed', 'updated', 'removed', 'unchanged', 'forced', '#full-import'])
 
 ALLOWED_CATEGORIES = set(['astronomy', 'planetary science', 'heliophysics', 'earth science', 'physics', 'other physics', 'other'])
@@ -53,6 +61,7 @@ def clear_caches():
 
 class SciXClassifierCelery(ADSCelery):
     # def __init__(self, *args, **kwargs):
+    #     # ADSCelery.__init__(self, app_name, *args, **kwargs)
     #     pass
 
     def load_model_and_tokenizer(pretrained_model_name_or_path=None, revision=None, tokenizer_model_name_or_path=None):
@@ -77,8 +86,11 @@ class SciXClassifierCelery(ADSCelery):
         label2id = {v:k for k,v in id2label.items()}
 
         # Define model and tokenizer
-        if pretrained_model_name_or_path is None:
-            pretrained_model_name_or_path = config['CLASSIFICATION_PRETRAINED_MODEL']
+        # if pretrained_model_name_or_path is None:
+        #     pretrained_model_name_or_path = config['CLASSIFICATION_PRETRAINED_MODEL']
+        # The above line leads to (Pdb) pretrained_model_name_or_path
+        # <SciXClassifierCelery __main__ at 0xffff60657190>
+        pretrained_model_name_or_path = "/app/ClassifierPipeline/tests/models/checkpoint-32100/"
         if revision is None:
             revision = config['CLASSIFICATION_PRETRAINED_MODEL_REVISION']
         if tokenizer_model_name_or_path is None:
@@ -90,6 +102,7 @@ class SciXClassifierCelery(ADSCelery):
                                                   do_lower_case=False)
 
         # load model
+        # import pdb;pdb.set_trace()
         model = AutoModelForSequenceClassification.from_pretrained(pretrained_model_name_or_path=pretrained_model_name_or_path,
                                         revision=revision,
                                         num_labels=len(labels),
@@ -235,8 +248,9 @@ class SciXClassifierCelery(ADSCelery):
         records : dictionary with the following keys: bibcode, text,
                     categories, scores, and model information
         """
+        # import pdb;pdb.set_trace()
         # Load model and tokenizer
-        model_dict = load_model_and_tokenizer()
+        model_dict = self.load_model_and_tokenizer()
 
         # Classify record
         record['categories'], record['scores'] = classifier.batch_assign_SciX_categories(
@@ -353,7 +367,7 @@ class SciXClassifierCelery(ADSCelery):
             writer.writerow(row)
 
 
-    def handle_input_from_master(self, message): 
+    def handle_input_from_master(self, message, tsv_output=True): 
         """
         Handles input for the task
         This handles input from master checks if input is single bibcode or batch of bibcodes
@@ -364,10 +378,75 @@ class SciXClassifierCelery(ADSCelery):
         """
 
         # Check if input is single bibcode or path to file of bibcodes, title and abstracts
-        import pdb;pdb.set_trace()
+        print('Handling input from master')
+        # import pdb;pdb.set_trace()
+        # tasks.task_send_input_record_to_classifier(message)
 
-        # If single bibcode
-        # if 'bibcode' in message.keys():
+        # If batch of bibcodes
+        # if message is type('classifyrecord_pb2.ClassifyRequestRecordList'):
+        # if message.classify_requests:
+        if isinstance(message, classifyrecord_pb2.ClassifyRequestRecordList):
+        # if message is type(list):
+            print('Batch of bibcodes')
+
+            # import pdb;pdb.set_trace()
+            run_id = self.index_run()
+            # run_id = '001'
+            validate = False
+            if tsv_output:
+                output_path = os.path.join(proj_home, 'output', f'{run_id}_classified.tsv')
+            else:
+                output_path = os.path.join(proj_home, 'output', f'{run_id}_classified.csv')
+
+            print('Preparing output file: {}'.format(output_path))
+            print()
+            self.prepare_output_file(output_path,tsv_output=tsv_output)
+            # prepare_output_file(output_path,tsv_output=tsv_output)
+
+            # import pdb;pdb.set_trace()
+            # import pdb;pdb.set_trace()
+            for request in message.classify_requests:
+                print('Request: {}'.format(request))
+                record = {'bibcode': request.bibcode,
+                          'title': request.title,
+                          'abstract': request.abstract,
+                          'text': request.title + ' ' + request.abstract,
+                          'validate': validate,
+                          'run_id': run_id,
+                          'tsv_output': tsv_output,
+                          'override': None,
+                          'output_path': output_path
+                          }
+
+                # import pdb;pdb.set_trace()
+                tasks.task_send_input_record_to_classifier(record)
+                # import pdb;pdb.set_trace()
+                
+                # message = classifyrecord_pb2.ClassifyRequestRecord(**record)
+                # message = classifyrecord_pb2.ClassifyRequestRecord(record)
+                # record_out = classifyrecord_pb2.ClassifyRequestRecord()
+                # import pdb;pdb.set_trace()
+                
+                # Parse(json.dumps(record), record_out)
+                # import pdb;pdb.set_trace()
+
+                # Wrap message in a protobuf message
+
+
+                # tasks.task_send_input_record_to_classifier.delay(json.dumps(record))
+                # tasks.task_send_input_record_to_classifier.delay(record)
+                # tasks.task_send_input_record_to_classifier.delay([record])
+                # from adsmg import ClassifyRequestRecord, ClassifyRequestRecordList
+                # record = ClassifyRequestRecord(bibcode=request.bibcode,
+                #                                title=request.title,
+                #                                abstract=request.abstract)
+                # record = ClassifyRequestRecord(record)
+                # tasks.task_send_input_record_to_classifier.apply_async([record])
+                # tasks.task_send_input_record_to_classifier.apply_async(json.dumps(record))
+                # tasks.task_send_input_record_to_classifier.apply_async(record)
+
+            # import pdb;pdb.set_trace()
+
         if message is type(dict):
             # print('Single bibcode')
             # import pdb;pdb.set_trace()
@@ -380,11 +459,14 @@ class SciXClassifierCelery(ADSCelery):
 
         # If batch of bibcodes
         # if 'filename' in message.keys():
-        if message is type('classifyrecord_pb2.ClassifyRequestRecordList'):
-        # if message is type(list):
-            # print('Batch of bibcodes')
-            import pdb;pdb.set_trace()
-            prepare_batch_from_master(message)
+        # if message is type('classifyrecord_pb2.ClassifyRequestRecordList'):
+        # # if message is type(list):
+        #     # print('Batch of bibcodes')
+        #     import pdb;pdb.set_trace()
+        #     for request in message.classify_requests:
+        #         print('Request: {}'.format(request))
+        #     import pdb;pdb.set_trace()
+        #     prepare_batch_from_master(message)
 
     def index_run(self):
         """

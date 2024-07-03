@@ -1,5 +1,6 @@
 import sys
 import os
+import json
 # from __future__ import absolute_import, unicode_literals
 import adsputils
 from adsputils import ADSCelery
@@ -10,11 +11,12 @@ from adsputils import ADSCelery
 # from SciXClassifier.models import KeyValue
 # from .app import SciXClassifierCelery
 import ClassifierPipeline.app as app_module
-# from kombu import Queue
+from adsputils import load_config, setup_logging
+from kombu import Queue
 # import datetime
 # from .classifier import score_record
 sys.path.append(os.path.abspath('../..'))
-from run import score_record, classify_record_from_scores, add_record_to_output_file
+# from run import score_record, classify_record_from_scores, add_record_to_output_file
 
 from sqlalchemy.orm import scoped_session
 from sqlalchemy.orm import sessionmaker
@@ -23,20 +25,21 @@ from sqlalchemy.orm import sessionmaker
 proj_home = os.path.realpath(os.path.join(os.path.dirname(__file__), "../"))
 app = app_module.SciXClassifierCelery(
         # app = SciXClassifierCelery(
-    "scixclassifier-pipeline",
+    # "scixclassifier-pipeline",
+    "classifier-pipeline",
     proj_home=proj_home,
     local_config=globals().get("local_config", {}),
 )
 # import pdb; pdb.set_trace()
 # from adsputils import setup_logging, load_config
-# config = load_config(proj_home=proj_home)
-# logger = setup_logging('run.py', proj_home=proj_home,
-#                         level=config.get('LOGGING_LEVEL', 'INFO'),
-#                         attach_stdout=config.get('LOG_STDOUT', False))
+config = load_config(proj_home=proj_home)
+logger = setup_logging('run.py', proj_home=proj_home,
+                        level=config.get('LOGGING_LEVEL', 'INFO'),
+                        attach_stdout=config.get('LOG_STDOUT', False))
 
-# app.conf.CELERY_QUEUES = (
-#     Queue("unclassified-queue", app.exchange, routing_key="unclassified-queue"),
-# )
+app.conf.CELERY_QUEUES = (
+    Queue("classify-record", app.exchange, routing_key="classify-record"),
+)
 # logger = app.logger
 
 
@@ -87,15 +90,17 @@ def task_send_input_record_to_classifier(message):
     """
 
     print("task_send_input_record_to_classifier")
+    # import pdb; pdb.set_trace()
     print(message)
 
     # import pdb; pdb.set_trace()
     # First obtain the raw scores from the classifier model
-    message = score_record(message)
+    # import pdb; pdb.set_trace()
+    message = app.score_record(message)
 
     # Then classify the record based on the raw scores
     # import pdb; pdb.set_trace()
-    message = classify_record_from_scores(message)
+    message = app.classify_record_from_scores(message)
     print('Collections: ')
     print(message['collections'])
 
@@ -106,7 +111,11 @@ def task_send_input_record_to_classifier(message):
 
     # import pdb; pdb.set_trace()
     # Write the new classification to the database
-    task_index_classified_record(message)
+    # task_index_classified_record(message) 
+    task_index_classified_record.delay(message)
+    # task_index_classified_record.apply_async(json.dumps(message))
+    # task_index_classified_record.apply_async(message)
+    # task_index_classified_record.apply_async(message)
 
     # import pdb; pdb.set_trace()
 
@@ -128,6 +137,7 @@ def task_index_classified_record(message):
     """
 
     print('Indexing Classified Record')
+    import pdb; pdb.set_trace()
     app.index_record(message)
     # import pdb; pdb.set_trace()
     # pass
@@ -165,7 +175,7 @@ def task_output_results(message):
     :type: adsmsg.OrcidClaims
     :return: no return
     """
-    add_record_to_output_file(message)
+    app.add_record_to_output_file(message)
 
 
 
