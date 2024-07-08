@@ -15,6 +15,7 @@ class ScoreTable(Base):
     __tablename__ = 'scores'
     id = Column(Integer, primary_key=True)
     bibcode = Column(String(19))
+    # scixid = Column(String(19))
     scores = Column(Text)
     created = Column(UTCDateTime, default=get_date)
     overrides_id = Column(Integer, ForeignKey('overrides.id'))
@@ -35,6 +36,7 @@ class OverrideTable(Base):
     id = Column(Integer, primary_key=True)
     # score_id = Column(Integer, ForeignKey('scores.id'))
     bibcode = Column(String(19))
+    # scixid = Column(String(19))
     override = Column(ARRAY(String))
     created = Column(UTCDateTime, default=get_date)
 
@@ -42,6 +44,7 @@ class FinalCollectionTable(Base):
     __tablename__ = 'final_collection'
     id = Column(Integer, primary_key=True)
     bibcode = Column(String(19))
+    # scixid = Column(String(19))
     score_id = Column(Integer, ForeignKey('scores.id'))
     collection = Column(ARRAY(String))
     # validated = Column(Enum('true', 'false'), default='false')

@@ -378,49 +378,50 @@ class SciXClassifierCelery(ADSCelery):
         """
 
         # Check if input is single bibcode or path to file of bibcodes, title and abstracts
-        print('Handling input from master')
+        self.logger.info('Handling input from master')
         # import pdb;pdb.set_trace()
         # tasks.task_send_input_record_to_classifier(message)
 
         # If batch of bibcodes
         # if message is type('classifyrecord_pb2.ClassifyRequestRecordList'):
         # if message.classify_requests:
-        if isinstance(message, classifyrecord_pb2.ClassifyRequestRecordList):
+        # if isinstance(message, classifyrecord_pb2.ClassifyRequestRecordList):
         # if message is type(list):
-            print('Batch of bibcodes')
+
+        self.logger.info('Batch of bibcodes')
+
+        # import pdb;pdb.set_trace()
+        run_id = self.index_run()
+        # run_id = '001'
+        validate = False
+        if tsv_output:
+            output_path = os.path.join(proj_home, 'output', f'{run_id}_classified.tsv')
+        else:
+            output_path = os.path.join(proj_home, 'output', f'{run_id}_classified.csv')
+
+        self.logger.info('Preparing output file: {}'.format(output_path))
+        # print()
+        self.prepare_output_file(output_path,tsv_output=tsv_output)
+        # prepare_output_file(output_path,tsv_output=tsv_output)
+
+        # import pdb;pdb.set_trace()
+        # import pdb;pdb.set_trace()
+        for request in message.classify_requests:
+            self.logger.info('Request: {}'.format(request))
+            record = {'bibcode': request.bibcode,
+                      'title': request.title,
+                      'abstract': request.abstract,
+                      'text': request.title + ' ' + request.abstract,
+                      'validate': validate,
+                      'run_id': run_id,
+                      'tsv_output': tsv_output,
+                      'override': None,
+                      'output_path': output_path
+                      }
 
             # import pdb;pdb.set_trace()
-            run_id = self.index_run()
-            # run_id = '001'
-            validate = False
-            if tsv_output:
-                output_path = os.path.join(proj_home, 'output', f'{run_id}_classified.tsv')
-            else:
-                output_path = os.path.join(proj_home, 'output', f'{run_id}_classified.csv')
-
-            print('Preparing output file: {}'.format(output_path))
-            print()
-            self.prepare_output_file(output_path,tsv_output=tsv_output)
-            # prepare_output_file(output_path,tsv_output=tsv_output)
-
+            tasks.task_send_input_record_to_classifier(record)
             # import pdb;pdb.set_trace()
-            # import pdb;pdb.set_trace()
-            for request in message.classify_requests:
-                print('Request: {}'.format(request))
-                record = {'bibcode': request.bibcode,
-                          'title': request.title,
-                          'abstract': request.abstract,
-                          'text': request.title + ' ' + request.abstract,
-                          'validate': validate,
-                          'run_id': run_id,
-                          'tsv_output': tsv_output,
-                          'override': None,
-                          'output_path': output_path
-                          }
-
-                # import pdb;pdb.set_trace()
-                tasks.task_send_input_record_to_classifier(record)
-                # import pdb;pdb.set_trace()
                 
                 # message = classifyrecord_pb2.ClassifyRequestRecord(**record)
                 # message = classifyrecord_pb2.ClassifyRequestRecord(record)
@@ -447,15 +448,15 @@ class SciXClassifierCelery(ADSCelery):
 
             # import pdb;pdb.set_trace()
 
-        if message is type(dict):
-            # print('Single bibcode')
-            # import pdb;pdb.set_trace()
-            record = {'bibcode': message['bibcode'],
-                      'title': message['title'],
-                      'abstract': message['abstract'],
-                      'text': message['title'] + ' ' + message['abstract']
-                      }
-            tasks.task_send_input_record_to_classifier(record)
+        # if message is type(dict):
+        #     # print('Single bibcode')
+        #     # import pdb;pdb.set_trace()
+        #     record = {'bibcode': message['bibcode'],
+        #               'title': message['title'],
+        #               'abstract': message['abstract'],
+        #               'text': message['title'] + ' ' + message['abstract']
+        #               }
+        #     tasks.task_send_input_record_to_classifier(record)
 
         # If batch of bibcodes
         # if 'filename' in message.keys():

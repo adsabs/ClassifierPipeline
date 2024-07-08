@@ -16,6 +16,10 @@ OUTPUT_CELERY_BROKER = "pyamqp://test:test@localhost:5682/master_pipeline"
 OUTPUT_TASKNAME = "adsmp.tasks.task_update_record"
 # OUTPUT_TASKNAME = "ClassifierPipeline.tasks.task_handle_input_from_master"
 
+# set to True adds .delay() or .apply_async() to the end of each task
+# set to False for direct function calls
+DELAY_MESSAGE = True
+# DELAY_MESSAGE = False
 
 # Thresholds for model checkpoint 32100
 # [Astrophysics, Heliophysics, Planetary Science, Earth Science, Biophysics, Other Physics, Other, Garbage]

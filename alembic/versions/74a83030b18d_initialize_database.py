@@ -24,6 +24,7 @@ def upgrade() -> None:
     op.create_table('overrides',
                     Column('id',Integer, primary_key=True),
                     Column('bibcode',String(19)),
+                    # Column('scixid',String(19)),
                     Column('override', ARRAY(String)),
                     Column('created', UTCDateTime, default=get_date()),
                     )
@@ -56,6 +57,7 @@ def upgrade() -> None:
     op.create_table('scores',
                     Column('id', Integer, primary_key=True),
                     Column('bibcode',String(19)),
+                    # Column('scixid',String(19)),
                     Column('scores', Text),
                     Column('run_id', Integer),
                     Column('overrides_id', BigInteger, nullable=True),
@@ -79,6 +81,7 @@ def upgrade() -> None:
     op.create_table('final_collection',
                     Column('id', Integer, primary_key=True),
                     Column('bibcode',String(19)),
+                    # Column('scixid',String(19)),
                     Column('score_id', Integer),
                     Column('collection', ARRAY(String)),
                     Column('validated', Boolean, default=False),

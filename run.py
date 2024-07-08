@@ -418,25 +418,38 @@ if __name__ == '__main__':
             # print("Scores: {}".format(record['scores']))
         # records = classify_records_from_scores(records)
 
-    import pdb;pdb.set_trace
+    # import pdb;pdb.set_trace
     if args.test:
-        print("Running tests")
-        print('more tests')
-        print('even more')
+        # print("Running tests")
+        # print('more tests')
+        # print('even more')
         # import pdb;pdb.set_trace
         # import pdb;pdb.set_trace
+        # logger.info("Running tests")
+        logger.debug("Running tests")
+
+        # Remove delay for testing
+        delay_message = config.get('DELAY_MESSAGE', False) 
+
+        logger.info("Delay set for queue messages: {}".format(delay_message))
 
         # Read a protobuf from a
         with open('ClassifierPipeline/tests/stub_data/classifier_request.json', 'r') as f:
             message_json = f.read()
         
-        message = classifyrecord_pb2.ClassifyRequestRecordList()
-        Parse(message_json, message)
+        # message = classifyrecord_pb2.ClassifyRequestRecordList()
+        # Parse(message_json, message)
         
         # import pdb;pdb.set_trace
-        message = app.handle_input_from_master(message)
+        # message = app.handle_input_from_master(message)
+        if delay_message:
+            message = tasks.task_update_record.delay(message_json)
+        # message = tasks.task_update_record.delay(message_json)
+        else:
+            message = tasks.task_update_record(message_json)
 
         # import pdb;pdb.set_trace
 
-    print("Done")
+    # print("Done")
+    logger.info("Done - run.py")
     # import pdb;pdb.set_trace()
