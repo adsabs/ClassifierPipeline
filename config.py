@@ -18,8 +18,12 @@ OUTPUT_TASKNAME = "adsmp.tasks.task_update_record"
 
 # set to True adds .delay() or .apply_async() to the end of each task
 # set to False for direct function calls
-DELAY_MESSAGE = True
-# DELAY_MESSAGE = False
+# DELAY_MESSAGE = True
+DELAY_MESSAGE = False
+
+# Return fake data instead of running the model for testing purposes
+FAKE_DATA = False
+# FAKE_DATA = True
 
 # Thresholds for model checkpoint 32100
 # [Astrophysics, Heliophysics, Planetary Science, Earth Science, Biophysics, Other Physics, Other, Garbage]

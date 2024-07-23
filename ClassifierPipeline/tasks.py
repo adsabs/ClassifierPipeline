@@ -1,6 +1,7 @@
 import sys
 import os
 import json
+import pickle
 # from __future__ import absolute_import, unicode_literals
 import adsputils
 from adsputils import ADSCelery
@@ -44,6 +45,8 @@ app.conf.CELERY_QUEUES = (
     Queue("update-record", app.exchange, routing_key="update-record")
 )
 # logger = app.logger
+
+MODEL_DICT = app_module.SciXClassifierCelery.load_model_and_tokenizer()
 
 
 # ============================= TASKS ============================================= #
@@ -93,7 +96,7 @@ def task_update_record(message, tsv_output=True):
     # if message is type(list):
     logger.info('********************************************')
     logger.info('*** task_update_record ***')
-    logger.info('Batch of bibcodes')
+    # logger.info('Batch of bibcodes')
 
     # import pdb;pdb.set_trace()
     run_id = app.index_run()
@@ -109,7 +112,7 @@ def task_update_record(message, tsv_output=True):
     # print()
     # app.prepare_output_file(output_path,tsv_output=tsv_output)
     # prepare_output_file(output_path,tsv_output=tsv_output)
-    logger.info('Output file prepared')
+    # logger.info('Output file prepared')
 
     # import pdb;pdb.set_trace()
     # import pdb;pdb.set_trace()
@@ -118,7 +121,7 @@ def task_update_record(message, tsv_output=True):
     # logger.info(message)
     # logger.info('Message requests')
     # logger.info(dir(message))
-    logger.info('message type: {}'.format(type(message)))
+    # logger.info('message type: {}'.format(type(message)))
     # logger.info('message contents: {}'.format(message))
 
     # Delay setting
@@ -127,6 +130,7 @@ def task_update_record(message, tsv_output=True):
 
     logger.info("Delay set for queue messages: {}".format(delay_message))
 
+    logger.info('Message to be parsed: {}'.format(message))
     parsed_message = json.loads(message)
 
     request_list = parsed_message['classifyRequests']
@@ -134,7 +138,16 @@ def task_update_record(message, tsv_output=True):
     # if not delay_message:
     #     import pdb;pdb.set_trace()
 
+    # model_dict = app.load_model_and_tokenizer()
+    # for key, value in model_dict['state_dict'].items():
+    #     model_dict['state_dict'][key] = value.tolist()
+    # import pdb;pdb.set_trace()
+    # model_dict = MODEL_DICT
+
+    # logger.info('Model loaded: {}'.format(model_dict))
+
     # for request in message.classify_requests:
+    logger.info('Request list: {}'.format(request_list))
     for request in request_list:
         logger.info('Request: {}'.format(request))
         record = {'bibcode': request['bibcode'],
@@ -145,66 +158,30 @@ def task_update_record(message, tsv_output=True):
                   'run_id': run_id,
                   'tsv_output': tsv_output,
                   'override': None,
-                  'output_path': output_path
+                  'output_path': output_path#,
+                  # 'model_dict' : model_dict
                   }
 
         # import pdb;pdb.set_trace()
+        out_message = parsed_message.copy()
+        out_message['classifyRequests'] = [record] # protobuf is for list of dictionaries
+        # import pdb;pdb.set_trace()
+        # out_message = json.dumps(out_message)
+        out_message = json.dumps(out_message)
+        # import pdb;pdb.set_trace()
+
         # if not delay_message:
         #     import pdb;pdb.set_trace()
-        # tasks.task_send_input_record_to_classifier(record)
+
+        logger.info('Record type: {}'.format(type(out_message)))
+        logger.info('Record: {}'.format(out_message))
         if delay_message:
-            task_send_input_record_to_classifier.delay(record)
+            task_send_input_record_to_classifier.delay(out_message)
         else:
             # import pdb;pdb.set_trace()
-            task_send_input_record_to_classifier(record)  
+            task_send_input_record_to_classifier(out_message)  
             # import pdb;pdb.set_trace()
             
-            # message = classifyrecord_pb2.ClassifyRequestRecord(**record)
-            # message = classifyrecord_pb2.ClassifyRequestRecord(record)
-            # record_out = classifyrecord_pb2.ClassifyRequestRecord()
-            # import pdb;pdb.set_trace()
-            
-            # Parse(json.dumps(record), record_out)
-            # import pdb;pdb.set_trace()
-
-            # Wrap message in a protobuf message
-
-
-            # tasks.task_send_input_record_to_classifier.delay(json.dumps(record))
-            # tasks.task_send_input_record_to_classifier.delay(record)
-            # tasks.task_send_input_record_to_classifier.delay([record])
-            # from adsmg import ClassifyRequestRecord, ClassifyRequestRecordList
-            # record = ClassifyRequestRecord(bibcode=request.bibcode,
-            #                                title=request.title,
-            #                                abstract=request.abstract)
-            # record = ClassifyRequestRecord(record)
-            # tasks.task_send_input_record_to_classifier.apply_async([record])
-            # tasks.task_send_input_record_to_classifier.apply_async(json.dumps(record))
-            # tasks.task_send_input_record_to_classifier.apply_async(record)
-
-        # import pdb;pdb.set_trace()
-
-    # if message is type(dict):
-        # print('Single bibcode')
-        # import pdb;pdb.set_trace()
-        # record = {'bibcode': message['bibcode'],
-        #           'title': message['title'],
-        #           'abstract': message['abstract'],
-        #           'text': message['title'] + ' ' + message['abstract']
-        #           }
-        # tasks.task_send_input_record_to_classifier(record)
-
-    # If batch of bibcodes
-    # if 'filename' in message.keys():
-    # if message is type('classifyrecord_pb2.ClassifyRequestRecordList'):
-    # # if message is type(list):
-    #     # print('Batch of bibcodes')
-    #     import pdb;pdb.set_trace()
-    #     for request in message.classify_requests:
-    #         print('Request: {}'.format(request))
-    #     import pdb;pdb.set_trace()
-    #     prepare_batch_from_master(message)
-
 
 # @app.task(queue="unclassified-queue")
 @app.task(queue="classify-record")
@@ -227,27 +204,47 @@ def task_send_input_record_to_classifier(message):
     delay_message = config.get('DELAY_MESSAGE', False) 
 
     logger.info("Delay set for queue messages: {}".format(delay_message))
-    # print("task_send_input_record_to_classifier")
-    # import pdb; pdb.set_trace()
-    # print(message)
+
+    fake_data = config.get('FAKE_DATA', False) 
+
+    logger.info("Fake data set for queue messages: {}".format(fake_data))
+
     if not delay_message:
         # import pdb; pdb.set_trace()
         pass
 
+    parsed_message = json.loads(message)
+
+    record = parsed_message['classifyRequests'][0]
+
     # import pdb; pdb.set_trace()
-    logger.info("Record before classification and thresholding")
+    logger.info("Parsed message")
+    logger.info(parsed_message)
+    # logger.info("Record before classification and thresholding")
+    # logger.info(record)
+    logger.info('Record type: {}'.format(type(record)))
     # logger.info("Record before classification and thresholding: {}".format(message))
     # First obtain the raw scores from the classifier model
     # import pdb; pdb.set_trace()
-    message = app.score_record(message)
+    record = app.score_record(record, fake_data=fake_data, model_dict=MODEL_DICT)
 
     # Then classify the record based on the raw scores
     # import pdb; pdb.set_trace()
-    message = app.classify_record_from_scores(message)
+    record = app.classify_record_from_scores(record)
     # print('Collections: ')
     # print(message['collections'])
-    logger.info("Record after classification and thresholding: {}".format(message))
+    logger.info("*****     /////     //////     /////     //////     *****")
+    logger.info("Record after classification and thresholding: {}".format(record))
+    logger.info("Record Type: {}".format(type(record)))
 
+    out_message = parsed_message.copy()
+    out_message['classifyRequests'] = [record]
+    # logger.info("Out Message")
+    # logger.info(out_message)
+    out_message = json.dumps(out_message)
+
+    # if not delay_message:
+    #     import pdb;pdb.set_trace()
     # Write the classifications to output file
     # add_record_to_output_file(message)
     # may have add .async 
@@ -256,9 +253,9 @@ def task_send_input_record_to_classifier(message):
     # import pdb; pdb.set_trace()
     # Write the new classification to the database
     if delay_message:
-        task_index_classified_record.delay(message)
+        task_index_classified_record.delay(out_message)
     else:
-        task_index_classified_record(message) 
+        task_index_classified_record(out_message) 
     # task_index_classified_record.delay(message)
     # task_index_classified_record.apply_async(json.dumps(message))
     # task_index_classified_record.apply_async(message)
@@ -267,7 +264,7 @@ def task_send_input_record_to_classifier(message):
     # import pdb; pdb.set_trace()
 
 
-# @app.task(queue="classify-record")
+@app.task(queue="classify-record")
 def task_index_classified_record(message):
     """
     Update the database with the new classification
@@ -289,12 +286,19 @@ def task_index_classified_record(message):
 
     logger.info("Delay set for queue messages: {}".format(delay_message))
 
-    if not delay_message:
-        # import pdb; pdb.set_trace()
-        pass
+    logger.info("Unpacking message for indexing")
+    message = json.loads(message)
+    record = message['classifyRequests'][0]
+    logger.info(message)
+    logger.info('Record type: {}'.format(type(message)))
+
+    # if not delay_message:
+    #     import pdb; pdb.set_trace()
+        # pass
+
     # print('Indexing Classified Record')
     # import pdb; pdb.set_trace()
-    app.index_record(message)
+    app.index_record(record)
     # import pdb; pdb.set_trace()
     # pass
 
