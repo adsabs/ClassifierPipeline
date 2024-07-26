@@ -46,8 +46,19 @@ app.conf.CELERY_QUEUES = (
 )
 # logger = app.logger
 
-MODEL_DICT = app_module.SciXClassifierCelery.load_model_and_tokenizer()
+if config.get('LOAD_MODEL_SOURCE') == "tasks_celery_object":
+    MODEL_DICT = app_module.SciXClassifierCelery.load_model_and_tokenizer()
+elif config.get('LOAD_MODEL_SOURCE') == "tasks_app_direct":
+    MODEL_DICT = app_module.load_model_and_tokenizer()
+elif config.get('LOAD_MODEL_SOURCE') == "tasks_app_direct":
+    MODEL_DICT = app_module.load_model_and_tokenizer()
+    logger.info('Model loaded in tasks')
+elif config['LOAD_MODEL_SOURCE'] == "test":
+    MODEL_DICT = None
+# import pdb;pdb.set_trace()
 
+# MODEL_DICT = app_module.load_model_and_tokenizer()
+# logger.info('Model loaded in tasks')
 
 # ============================= TASKS ============================================= #
 
@@ -130,7 +141,7 @@ def task_update_record(message, tsv_output=True):
 
     logger.info("Delay set for queue messages: {}".format(delay_message))
 
-    logger.info('Message to be parsed: {}'.format(message))
+    # logger.info('Message to be parsed: {}'.format(message))
     parsed_message = json.loads(message)
 
     request_list = parsed_message['classifyRequests']
@@ -147,7 +158,7 @@ def task_update_record(message, tsv_output=True):
     # logger.info('Model loaded: {}'.format(model_dict))
 
     # for request in message.classify_requests:
-    logger.info('Request list: {}'.format(request_list))
+    # logger.info('Request list: {}'.format(request_list))
     for request in request_list:
         logger.info('Request: {}'.format(request))
         record = {'bibcode': request['bibcode'],
@@ -173,10 +184,11 @@ def task_update_record(message, tsv_output=True):
         # if not delay_message:
         #     import pdb;pdb.set_trace()
 
-        logger.info('Record type: {}'.format(type(out_message)))
-        logger.info('Record: {}'.format(out_message))
+        logger.info('Output Record type: {}'.format(type(out_message)))
+        logger.info('Output Record: {}'.format(out_message))
         if delay_message:
             task_send_input_record_to_classifier.delay(out_message)
+            # task_send_input_record_to_classifier.apply_async(out_message)
         else:
             # import pdb;pdb.set_trace()
             task_send_input_record_to_classifier(out_message)  
@@ -206,6 +218,8 @@ def task_send_input_record_to_classifier(message):
     logger.info("Delay set for queue messages: {}".format(delay_message))
 
     fake_data = config.get('FAKE_DATA', False) 
+    # if config.get('MODEL_DICT_SOURCE') == "test":
+    #     fake_data = True
 
     logger.info("Fake data set for queue messages: {}".format(fake_data))
 
@@ -220,13 +234,24 @@ def task_send_input_record_to_classifier(message):
     # import pdb; pdb.set_trace()
     logger.info("Parsed message")
     logger.info(parsed_message)
+    # logger.info('model to use: {}'.format(model))
     # logger.info("Record before classification and thresholding")
     # logger.info(record)
-    logger.info('Record type: {}'.format(type(record)))
+    # logger.info('Record type: {}'.format(type(record)))
     # logger.info("Record before classification and thresholding: {}".format(message))
     # First obtain the raw scores from the classifier model
     # import pdb; pdb.set_trace()
-    record = app.score_record(record, fake_data=fake_data, model_dict=MODEL_DICT)
+    # record = app.score_record(record, fake_data=fake_data)
+
+    tasks_sources = ['tasks_celery_object', 'tasks_app_direct']
+    app_sources = ['app_direct']
+    # if MODEL_DICT is loaded in tasks then pass it
+    if config.get('LOAD_MODEL_SOURCE') in tasks_sources:
+        record = app.score_record(record, fake_data=fake_data, model_dict=MODEL_DICT)
+    # If MODEL_DICT is loaded in app then don't pass it
+    if config.get('LOAD_MODEL_SOURCE') in app_sources:
+        record = app.score_record(record, fake_data=fake_data)
+    # record = app.score_record(record, fake_data=fake_data, model_dict=MODEL_DICT)
 
     # Then classify the record based on the raw scores
     # import pdb; pdb.set_trace()

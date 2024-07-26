@@ -29,7 +29,6 @@ from ClassifierPipeline import tasks, classifier
 from adsputils import load_config, setup_logging
 # from adsmg import ClassifyRequestRecord, ClassifyRequestRecordList
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
-from ClassifierPipeline import classifier
 
 # from google.protobuf.json_format import MessageToDict
 import classifyrecord_pb2
@@ -89,6 +88,7 @@ def load_model_and_tokenizer(pretrained_model_name_or_path=None, revision=None, 
     id2label = {i:c for i,c in enumerate(labels) }
     label2id = {v:k for k,v in id2label.items()}
 
+    # import pdb;pdb.set_trace()
     # Define model and tokenizer
     # if pretrained_model_name_or_path is None:
     #     pretrained_model_name_or_path = config['CLASSIFICATION_PRETRAINED_MODEL']
@@ -121,13 +121,22 @@ def load_model_and_tokenizer(pretrained_model_name_or_path=None, revision=None, 
                   'id2label': id2label,
                   'label2id': label2id}
 
-    logger.info('Model loaded') 
+    logger.info('Model loading function - top level of app.py')
     return model_dict
 
 # logger.info('Loading model and tokenizer')
 # MODEL_DICT = load_model_and_tokenizer()
 
-# MODEL_DICT = load_model_and_tokenizer()
+# import pdb;pdb.set_trace()
+
+if config['LOAD_MODEL_SOURCE'] == "app_direct":
+    MODEL_DICT = load_model_and_tokenizer()
+    # MODEL_DICT2 = load_model_and_tokenizer()
+    # MODEL_DICT3 = load_model_and_tokenizer()
+    # MODEL_DICT4 = load_model_and_tokenizer()
+# elif config['LOAD_MODEL_SOURCE'] == "test":
+#     MODEL_DICT = None
+
 
 class SciXClassifierCelery(ADSCelery):
     # def __init__(self, app_name, *args, **kwargs):
@@ -186,10 +195,10 @@ class SciXClassifierCelery(ADSCelery):
                                         label2id=label2id
                                             )
         # Output as dictionary
-        model_dict = {'model': model,
         # model_dict = {
         #               'model_config': model.config.to_dict(),
         #               'state_dict': model.state_dict(),
+        model_dict = {'model': model,
                       'tokenizer': tokenizer,
                       'labels': labels,
                       'id2label': id2label,
@@ -202,6 +211,7 @@ class SciXClassifierCelery(ADSCelery):
         #     # model_dict['state_dict'][key] = value.cpu().numpy().tolist()
         #     model_dict['state_dict'][key] = value.tolist()
 
+        logger.info('Model loading function - instance of SciXClassifierCelery')
         return model_dict
 
     def is_blank(s):
@@ -321,6 +331,7 @@ class SciXClassifierCelery(ADSCelery):
 
 
     def score_record(self, record, model_dict=None,fake_data=False):
+    # def score_record(self, record,fake_data=False):
         """
         Provide classification scores for a record using the following
             categories:
@@ -351,11 +362,19 @@ class SciXClassifierCelery(ADSCelery):
         # model_dict = self.model_dict
         # model_dict = record['model_dict']
         # model_dict = MODEL_DICT
+
+        # global MODEL_DICT
+        # model_dict = MODEL_DICT
         # self.motto = "I am the SciXClassifierCelery"
         logger.info('Scoring record: {}'.format(record))
         # if MODEL_DICT:
         #     logger.info('MODEL DICT: {}'.format(MODEL_DICT))
-        # logger.info('MODEL DICT labels: {}'.format(MODEL_DICT['labels']))
+        if model_dict is None:
+            model_dict = MODEL_DICT
+            logger.info('local MODEL_DICT')
+        logger.info('MODEL DICT labels: {}'.format(model_dict['labels']))
+        logger.info('MODEL DICT model: {}'.format(model_dict['model']))
+        logger.info('MODEL DICT model type: {}'.format(type(model_dict['model'])))
         # import pdb;pdb.set_trace()
 
         # Classify record
@@ -363,11 +382,15 @@ class SciXClassifierCelery(ADSCelery):
         #                             [record['text']],model_dict['tokenizer'],
         #                             model_dict['model'],model_dict['labels'],
         #                             model_dict['id2label'],model_dict['label2id'])
-        if not fake_data:
-            record['categories'], record['scores'] = classifier.batch_assign_SciX_categories(
-                                        [record['text']],model_dict['tokenizer'],
-                                        model_dict['model'],model_dict['labels'],
-                                        model_dict['id2label'],model_dict['label2id'])
+        if fake_data is False:
+            try:
+                logger.info('Trying to Scoring record')
+                record['categories'], record['scores'] = classifier.batch_assign_SciX_categories(
+                                            [record['text']],model_dict['tokenizer'],
+                                            model_dict['model'],model_dict['labels'],
+                                            model_dict['id2label'],model_dict['label2id'])
+            except:
+                logger.exception('Error in scoring record')
             # record['categories'], record['scores'] = classifier.batch_assign_SciX_categories(
             #                             [record['text']],MODEL_DICT['tokenizer'],
             #                             MODEL_DICT['model'],MODEL_DICT['labels'],
@@ -375,6 +398,7 @@ class SciXClassifierCelery(ADSCelery):
 
             # Because the classifier returns a list of lists so it can batch process
             # Take only the first element of each list
+            # import pdb;pdb.set_trace()
             record['categories'] = record['categories'][0]
             record['scores'] = record['scores'][0]
         else:

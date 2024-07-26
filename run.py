@@ -28,7 +28,9 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 # from adsputils import get_date
 # from adsmsg import OrcidClaims
-from ClassifierPipeline import classifier, tasks, app
+from ClassifierPipeline import classifier, tasks
+from ClassifierPipeline import app as app_module
+from ClassifierPipeline.tasks import task_update_record
 # from ClassifierPipeline import classifier, tasks
 # from ADSOrcid import updater, tasks
 # from ADSOrcid.models import ClaimsLog, KeyValue, Records, AuthorInfo
@@ -47,7 +49,7 @@ logger = setup_logging('run.py', proj_home=proj_home,
                         attach_stdout=config.get('LOG_STDOUT', False))
 
 # app = app_module.SciXClassifierCelery(
-app = app.SciXClassifierCelery(
+app = app_module.SciXClassifierCelery(
         # app = SciXClassifierCelery(
     "scixclassifier-pipeline",
     proj_home=proj_home,
@@ -63,6 +65,7 @@ app = app.SciXClassifierCelery(
 
 # To test the classifier
 # python run.py -n -r ClassifierPipeline/tests/stub_data/stub_new_records.csv
+# import pdb;pdb.set_trace()
 
 if __name__ == '__main__':
 
@@ -139,8 +142,9 @@ if __name__ == '__main__':
         logger.info("Delay set for queue messages: {}".format(delay_message))
 
         # Read a protobuf from a
-        with open('ClassifierPipeline/tests/stub_data/classifier_request_shorter.json', 'r') as f:
+        # with open('ClassifierPipeline/tests/stub_data/classifier_request_shorter.json', 'r') as f:
         # with open('ClassifierPipeline/tests/stub_data/classifier_request_short.json', 'r') as f:
+        with open(config.get('TEST_INPUT_DATA'), 'r') as f:
             message_json = f.read()
         # with open('ClassifierPipeline/tests/stub_data/classifier_request.json', 'r') as f:
         #     message_json = f.read()
@@ -152,10 +156,12 @@ if __name__ == '__main__':
         logger.info('Message for testing: {}'.format(message_json))
         # message = app.handle_input_from_master(message)
         if delay_message:
-            message = tasks.task_update_record.delay(message_json)
+            # message = tasks.task_update_record.delay(message_json)
+            message = task_update_record.delay(message_json)
         # message = tasks.task_update_record.delay(message_json)
         else:
-            message = tasks.task_update_record(message_json)
+            # message = tasks.task_update_record(message_json)
+            message = task_update_record(message_json)
 
         # import pdb;pdb.set_trace
 

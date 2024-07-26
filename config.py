@@ -18,12 +18,23 @@ OUTPUT_TASKNAME = "adsmp.tasks.task_update_record"
 
 # set to True adds .delay() or .apply_async() to the end of each task
 # set to False for direct function calls
-# DELAY_MESSAGE = True
-DELAY_MESSAGE = False
+DELAY_MESSAGE = True
+# DELAY_MESSAGE = False
 
 # Return fake data instead of running the model for testing purposes
 FAKE_DATA = False
 # FAKE_DATA = True
+
+# Load Model and Tokenizer method
+# LOAD_MODEL_SOURCE = "tasks_celery_object"
+# LOAD_MODEL_SOURCE =  "tasks_app_direct"
+LOAD_MODEL_SOURCE =  "app_direct"
+# LOAD_MODEL_SOURCE = "test"
+
+#Data to Skip message from Master Pipeline
+# TEST_INPUT_DATA = 'ClassifierPipeline/tests/stub_data/classifier_request.json'
+# TEST_INPUT_DATA = 'ClassifierPipeline/tests/stub_data/classifier_request_short.json'
+TEST_INPUT_DATA = 'ClassifierPipeline/tests/stub_data/classifier_request_shorter.json'
 
 # Thresholds for model checkpoint 32100
 # [Astrophysics, Heliophysics, Planetary Science, Earth Science, Biophysics, Other Physics, Other, Garbage]
