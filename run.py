@@ -24,12 +24,13 @@ import argparse
 # warnings.simplefilter('ignore', exceptions.InsecurePlatformWarning)
 
 # import pandas as pd
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
+# from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 # from adsputils import get_date
 # from adsmsg import OrcidClaims
-from ClassifierPipeline import classifier, tasks
-from ClassifierPipeline import app as app_module
+# from ClassifierPipeline import classifier, tasks
+# from ClassifierPipeline import tasks
+# from ClassifierPipeline import app as app_module
 from ClassifierPipeline.tasks import task_update_record
 # from ClassifierPipeline import classifier, tasks
 # from ADSOrcid import updater, tasks
@@ -49,14 +50,16 @@ logger = setup_logging('run.py', proj_home=proj_home,
                         attach_stdout=config.get('LOG_STDOUT', False))
 
 # app = app_module.SciXClassifierCelery(
-app = app_module.SciXClassifierCelery(
-        # app = SciXClassifierCelery(
-    "scixclassifier-pipeline",
-    proj_home=proj_home,
-    local_config=globals().get("local_config", {}),
-    )
+# app = app_module.SciXClassifierCelery(
+#         # app = SciXClassifierCelery(
+#     "scixclassifier-pipeline",
+#     proj_home=proj_home,
+#     local_config=globals().get("local_config", {}),
+    # )
 # app = tasks.app
 # app = SciXClassifierCelery()
+# logger.info('Loading model and tokenizer')
+# MODEL_DICT = app.load_model_and_tokenizer()
 
 # =============================== FUNCTIONS ======================================= #
 
@@ -156,10 +159,12 @@ if __name__ == '__main__':
         logger.info('Message for testing: {}'.format(message_json))
         # message = app.handle_input_from_master(message)
         if delay_message:
+            pass
             # message = tasks.task_update_record.delay(message_json)
             message = task_update_record.delay(message_json)
         # message = tasks.task_update_record.delay(message_json)
-        else:
+        else: 
+            pass
             # message = tasks.task_update_record(message_json)
             message = task_update_record(message_json)
 

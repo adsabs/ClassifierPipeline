@@ -12,6 +12,7 @@ from adsputils import ADSCelery
 # from SciXClassifier.models import KeyValue
 # from .app import SciXClassifierCelery
 import ClassifierPipeline.app as app_module
+from ClassifierPipeline.classifier import Classifier
 from adsputils import load_config, setup_logging
 from kombu import Queue
 # import datetime
@@ -23,6 +24,7 @@ from google.protobuf.json_format import Parse
 
 from sqlalchemy.orm import scoped_session
 from sqlalchemy.orm import sessionmaker
+# import pdb;pdb.set_trace()
 # ============================= INITIALIZATION ==================================== #
 
 proj_home = os.path.realpath(os.path.join(os.path.dirname(__file__), "../"))
@@ -46,15 +48,15 @@ app.conf.CELERY_QUEUES = (
 )
 # logger = app.logger
 
-if config.get('LOAD_MODEL_SOURCE') == "tasks_celery_object":
-    MODEL_DICT = app_module.SciXClassifierCelery.load_model_and_tokenizer()
-elif config.get('LOAD_MODEL_SOURCE') == "tasks_app_direct":
-    MODEL_DICT = app_module.load_model_and_tokenizer()
-elif config.get('LOAD_MODEL_SOURCE') == "tasks_app_direct":
-    MODEL_DICT = app_module.load_model_and_tokenizer()
-    logger.info('Model loaded in tasks')
-elif config['LOAD_MODEL_SOURCE'] == "test":
-    MODEL_DICT = None
+classifier = Classifier()
+
+# if config.get('LOAD_MODEL_SOURCE') == "tasks_celery_object":
+#     MODEL_DICT = app_module.SciXClassifierCelery.load_model_and_tokenizer()
+# elif config.get('LOAD_MODEL_SOURCE') == "tasks_app_direct":
+#     MODEL_DICT = app_module.load_model_and_tokenizer()
+#     logger.info('Model loaded in tasks')
+# elif config.get('LOAD_MODEL_SOURCE') == "test":
+#     MODEL_DICT = None
 # import pdb;pdb.set_trace()
 
 # MODEL_DICT = app_module.load_model_and_tokenizer()
@@ -248,8 +250,16 @@ def task_send_input_record_to_classifier(message):
     # if MODEL_DICT is loaded in tasks then pass it
     if config.get('LOAD_MODEL_SOURCE') in tasks_sources:
         record = app.score_record(record, fake_data=fake_data, model_dict=MODEL_DICT)
-    # If MODEL_DICT is loaded in app then don't pass it
-    if config.get('LOAD_MODEL_SOURCE') in app_sources:
+    # try using a class
+    elif config.get('LOAD_MODEL_SOURCE') == "test":
+        logger.info('Testing object load')
+        # categories, scores = Classifier().batch_assign_SciX_categories(record['text'])
+        categories, scores = classifier.batch_assign_SciX_categories([record['text']])
+        logger.info('Categories: {}'.format(categories))
+        logger.info('Scores: {}'.format(scores))
+        # import pdb; pdb.set_trace()
+    # elif config.get('LOAD_MODEL_SOURCE') in app_sources:
+    else:
         record = app.score_record(record, fake_data=fake_data)
     # record = app.score_record(record, fake_data=fake_data, model_dict=MODEL_DICT)
 

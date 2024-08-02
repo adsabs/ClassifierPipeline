@@ -18,7 +18,9 @@ from contextlib import contextmanager
 # from sqlalchemy import and_
 from sqlalchemy import create_engine, desc, and_
 from sqlalchemy.orm import scoped_session, sessionmaker
-from ClassifierPipeline import tasks, classifier
+# from ClassifierPipeline import tasks, classifier
+from ClassifierPipeline import tasks
+from ClassifierPipeline.classifier import Classifier
 # import cachetools
 # import datetime
 # import os
@@ -53,6 +55,9 @@ logger = setup_logging('app.py', proj_home=proj_home,
                         level=config.get('LOGGING_LEVEL', 'INFO'),
                         attach_stdout=config.get('LOG_STDOUT', True))
 
+logger.info('Config file {}'.format(config))
+
+classifier = Classifier()
 
 def get_checksum(text):
     """Compute CRC (integer) of a string"""
@@ -129,8 +134,9 @@ def load_model_and_tokenizer(pretrained_model_name_or_path=None, revision=None, 
 
 # import pdb;pdb.set_trace()
 
-if config['LOAD_MODEL_SOURCE'] == "app_direct":
-    MODEL_DICT = load_model_and_tokenizer()
+# if config['LOAD_MODEL_SOURCE'] == "app_direct":
+#     pass
+    # MODEL_DICT = load_model_and_tokenizer()
     # MODEL_DICT2 = load_model_and_tokenizer()
     # MODEL_DICT3 = load_model_and_tokenizer()
     # MODEL_DICT4 = load_model_and_tokenizer()
@@ -148,7 +154,7 @@ class SciXClassifierCelery(ADSCelery):
     #     pass
         
     @staticmethod
-    def load_model_and_tokenizer(pretrained_model_name_or_path=None, revision=None, tokenizer_model_name_or_path=None):
+    def load_model_and_tokenizer(self,pretrained_model_name_or_path=None, revision=None, tokenizer_model_name_or_path=None):
         """
         Load the model and tokenizer for the classification task, as well as the
         label mappings. Returns the model, tokenizer, and label mappings as a
@@ -369,12 +375,12 @@ class SciXClassifierCelery(ADSCelery):
         logger.info('Scoring record: {}'.format(record))
         # if MODEL_DICT:
         #     logger.info('MODEL DICT: {}'.format(MODEL_DICT))
-        if model_dict is None:
-            model_dict = MODEL_DICT
-            logger.info('local MODEL_DICT')
-        logger.info('MODEL DICT labels: {}'.format(model_dict['labels']))
-        logger.info('MODEL DICT model: {}'.format(model_dict['model']))
-        logger.info('MODEL DICT model type: {}'.format(type(model_dict['model'])))
+        # if model_dict is None:
+        #     model_dict = MODEL_DICT
+        #     logger.info('local MODEL_DICT')
+        # logger.info('MODEL DICT labels: {}'.format(model_dict['labels']))
+        # logger.info('MODEL DICT model: {}'.format(model_dict['model']))
+        # logger.info('MODEL DICT model type: {}'.format(type(model_dict['model'])))
         # import pdb;pdb.set_trace()
 
         # Classify record
@@ -382,9 +388,13 @@ class SciXClassifierCelery(ADSCelery):
         #                             [record['text']],model_dict['tokenizer'],
         #                             model_dict['model'],model_dict['labels'],
         #                             model_dict['id2label'],model_dict['label2id'])
-        if fake_data is False:
+        # if fake_data is False:
+        # logger.info('Config file {}'.format(config))
+        model_implementation = config.get('MODEL_IMPLEMENTATION', 'object_load')
+        # model_implementation = config.get('MODEL_IMPLEMENTATION', 'fake_data')
+        if model_implementation == 'direct_load':
+            logger.info('Trying to Scoring record - old method')
             try:
-                logger.info('Trying to Scoring record')
                 record['categories'], record['scores'] = classifier.batch_assign_SciX_categories(
                                             [record['text']],model_dict['tokenizer'],
                                             model_dict['model'],model_dict['labels'],
@@ -401,6 +411,25 @@ class SciXClassifierCelery(ADSCelery):
             # import pdb;pdb.set_trace()
             record['categories'] = record['categories'][0]
             record['scores'] = record['scores'][0]
+        elif model_implementation == 'object_load':
+        # elif config['MODEL_IMPLEMENTATION'] == 'object_load':
+            logger.info('Trying to Scoring record - new method')
+            try:
+                record['categories'], record['scores'] = classifier.batch_assign_SciX_categories(
+                                            [record['text']])
+            except:
+                logger.exception('Error in scoring record')
+            # record['categories'], record['scores'] = classifier.batch_assign_SciX_categories(
+            #                             [record['text']],MODEL_DICT['tokenizer'],
+            #                             MODEL_DICT['model'],MODEL_DICT['labels'],
+            #                             MODEL_DICT['id2label'],MODEL_DICT['label2id'])
+
+            # Because the classifier returns a list of lists so it can batch process
+            # Take only the first element of each list
+            # import pdb;pdb.set_trace()
+            record['categories'] = record['categories'][0]
+            record['scores'] = record['scores'][0]
+        # elif config['MODEL_IMPLEMENTATION'] == 'fake_data':
         else:
             logger.info('Using fake data')
 
@@ -428,6 +457,7 @@ class SciXClassifierCelery(ADSCelery):
         # print("Categories: {}".format(record['categories']))
         # print("Scores: {}".format(record['scores']))
 
+        # import pdb;pdb.set_trace()
         return record
 
     def classify_record_from_scores(self, record):
@@ -450,6 +480,7 @@ class SciXClassifierCelery(ADSCelery):
         # print('Thresholds: {}'.format(thresholds))
 
 
+        # import pdb;pdb.set_trace()
         scores = record['scores']
         categories = record['categories']
         # max_score_index = scores.index(max(scores))
