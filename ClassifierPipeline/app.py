@@ -58,7 +58,7 @@ logger = setup_logging('app.py', proj_home=proj_home,
                         level=config.get('LOGGING_LEVEL', 'INFO'),
                         attach_stdout=config.get('LOG_STDOUT', True))
 
-# logger.info('Config file {}'.format(config))
+logger.info('Config file {}'.format(config))
 
 
 class SciXClassifierCelery(ADSCelery):

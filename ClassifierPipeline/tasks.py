@@ -329,7 +329,8 @@ def task_index_classified_record(message):
 
     record, success = app.index_record(record)
     if success is True:
-        task_output_results(record)
+        logger.info("Record indexed, outputting results")
+        # task_output_results(record)
     else:
         logger.info("Record failed to be indexed")
     # import pdb; pdb.set_trace()
@@ -368,6 +369,8 @@ def task_output_results(message):
     :type: adsmsg.OrcidClaims
     :return: no return
     """
+    logger.info('Output results ')
+    logger.info(message)
     app.add_record_to_output_file(message)
 
 
