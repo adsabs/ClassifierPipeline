@@ -1,5 +1,5 @@
 import os
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
+# from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from torch import no_grad, tensor
 from adsputils import load_config, setup_logging
 from ClassifierPipeline.astrobert_classification import AstroBERTClassification

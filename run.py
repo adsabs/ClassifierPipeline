@@ -11,6 +11,7 @@
 # __credit__ = ['J. Elliott']
 # __license__ = 'MIT'
 
+print('Run.py')
 import os
 import csv
 # import sys
@@ -32,6 +33,7 @@ import argparse
 # from ClassifierPipeline import tasks
 # from ClassifierPipeline import app as app_module
 from ClassifierPipeline.tasks import task_update_record
+from ClassifierPipeline import tasks
 # from ClassifierPipeline import classifier, tasks
 # from ADSOrcid import updater, tasks
 # from ADSOrcid.models import ClaimsLog, KeyValue, Records, AuthorInfo
@@ -55,7 +57,7 @@ logger = setup_logging('run.py', proj_home=proj_home,
 #     "scixclassifier-pipeline",
 #     proj_home=proj_home,
 #     local_config=globals().get("local_config", {}),
-    # )
+#     )
 # app = tasks.app
 # app = SciXClassifierCelery()
 # logger.info('Loading model and tokenizer')
@@ -131,18 +133,20 @@ if __name__ == '__main__':
 
     # import pdb;pdb.set_trace
     if args.test:
-        # print("Running tests")
+        print("Running tests")
         # print('more tests')
         # print('even more')
         # import pdb;pdb.set_trace
         # import pdb;pdb.set_trace
         # logger.info("Running tests")
         logger.debug("Running tests")
+        logger.info("Dev Env")
 
         # Remove delay for testing
         delay_message = config.get('DELAY_MESSAGE', True) 
 
         logger.info("Delay set for queue messages: {}".format(delay_message))
+        logger.info("Config: TEST_INPUT_DATA: {}".format(config.get('TEST_INPUT_DATA')))
 
         # Read a protobuf from a
         # with open('ClassifierPipeline/tests/stub_data/classifier_request_shorter.json', 'r') as f:
@@ -158,13 +162,14 @@ if __name__ == '__main__':
         # import pdb;pdb.set_trace
         logger.info('Message for testing: {}'.format(message_json))
         # message = app.handle_input_from_master(message)
+        print('sending message')
         if delay_message:
-            pass
+            # pass
             # message = tasks.task_update_record.delay(message_json)
             message = task_update_record.delay(message_json)
         # message = tasks.task_update_record.delay(message_json)
         else: 
-            pass
+            # pass
             # message = tasks.task_update_record(message_json)
             message = task_update_record(message_json)
 

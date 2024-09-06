@@ -12,12 +12,13 @@ from adsputils import ADSCelery
 # from SciXClassifier.models import KeyValue
 # from .app import SciXClassifierCelery
 import ClassifierPipeline.app as app_module
+import ClassifierPipeline.utilities as utils
 from ClassifierPipeline.classifier import Classifier
 from adsputils import load_config, setup_logging
 from kombu import Queue
 # import datetime
 # from .classifier import score_record
-sys.path.append(os.path.abspath('../..'))
+# sys.path.append(os.path.abspath('../..'))
 # from run import score_record, classify_record_from_scores, add_record_to_output_file
 import classifyrecord_pb2
 from google.protobuf.json_format import Parse
@@ -50,17 +51,6 @@ app.conf.CELERY_QUEUES = (
 
 classifier = Classifier()
 
-# if config.get('LOAD_MODEL_SOURCE') == "tasks_celery_object":
-#     MODEL_DICT = app_module.SciXClassifierCelery.load_model_and_tokenizer()
-# elif config.get('LOAD_MODEL_SOURCE') == "tasks_app_direct":
-#     MODEL_DICT = app_module.load_model_and_tokenizer()
-#     logger.info('Model loaded in tasks')
-# elif config.get('LOAD_MODEL_SOURCE') == "test":
-#     MODEL_DICT = None
-# import pdb;pdb.set_trace()
-
-# MODEL_DICT = app_module.load_model_and_tokenizer()
-# logger.info('Model loaded in tasks')
 
 # ============================= TASKS ============================================= #
 
@@ -110,6 +100,7 @@ def task_update_record(message, tsv_output=True):
     logger.info('********************************************')
     logger.info('*** task_update_record ***')
     # logger.info('Batch of bibcodes')
+    output_path = ''
 
     # import pdb;pdb.set_trace()
     run_id = app.index_run()
@@ -117,25 +108,20 @@ def task_update_record(message, tsv_output=True):
     # run_id = '001'
     validate = False
     if tsv_output:
-        output_path = os.path.join(proj_home, 'output', f'{run_id}_classified.tsv')
+        logger.info('output path A: {}'.format(output_path))
+        # output_path = os.path.join(proj_home, 'output', f'{run_id}_classified.tsv')
+        output_path = os.path.join(proj_home, 'logs', f'{run_id}_classified.tsv')
+        # output_path = proj_home+f'/logs/{run_id}_classified.tsv'
+        logger.info('output path B: {}'.format(output_path))
     else:
         output_path = os.path.join(proj_home, 'output', f'{run_id}_classified.csv')
 
     logger.info('Preparing output file: {}'.format(output_path))
     # print()
-    # app.prepare_output_file(output_path,tsv_output=tsv_output)
+    utils.prepare_output_file(output_path,tsv_output=tsv_output)
     # prepare_output_file(output_path,tsv_output=tsv_output)
-    # logger.info('Output file prepared')
+    logger.info('Output file prepared')
 
-    # import pdb;pdb.set_trace()
-    # import pdb;pdb.set_trace()
-    # logger.info('Message being sent')
-    # message = classifyrecord_pb2.ClassifyRequestRecordList(**message)
-    # logger.info(message)
-    # logger.info('Message requests')
-    # logger.info(dir(message))
-    # logger.info('message type: {}'.format(type(message)))
-    # logger.info('message contents: {}'.format(message))
 
     # Delay setting
     
@@ -148,16 +134,6 @@ def task_update_record(message, tsv_output=True):
 
     request_list = parsed_message['classifyRequests']
 
-    # if not delay_message:
-    #     import pdb;pdb.set_trace()
-
-    # model_dict = app.load_model_and_tokenizer()
-    # for key, value in model_dict['state_dict'].items():
-    #     model_dict['state_dict'][key] = value.tolist()
-    # import pdb;pdb.set_trace()
-    # model_dict = MODEL_DICT
-
-    # logger.info('Model loaded: {}'.format(model_dict))
 
     # for request in message.classify_requests:
     # logger.info('Request list: {}'.format(request_list))
@@ -189,6 +165,7 @@ def task_update_record(message, tsv_output=True):
         logger.info('Output Record type: {}'.format(type(out_message)))
         logger.info('Output Record: {}'.format(out_message))
         if delay_message:
+            logger.info('Using delay')
             task_send_input_record_to_classifier.delay(out_message)
             # task_send_input_record_to_classifier.apply_async(out_message)
         else:
@@ -198,6 +175,7 @@ def task_update_record(message, tsv_output=True):
             
 
 # @app.task(queue="unclassified-queue")
+# @app.task(queue="update-record")
 @app.task(queue="classify-record")
 def task_send_input_record_to_classifier(message):
     """
@@ -248,23 +226,36 @@ def task_send_input_record_to_classifier(message):
     tasks_sources = ['tasks_celery_object', 'tasks_app_direct']
     app_sources = ['app_direct']
     # if MODEL_DICT is loaded in tasks then pass it
-    if config.get('LOAD_MODEL_SOURCE') in tasks_sources:
-        record = app.score_record(record, fake_data=fake_data, model_dict=MODEL_DICT)
-    # try using a class
-    elif config.get('LOAD_MODEL_SOURCE') == "test":
-        logger.info('Testing object load')
+    # if config.get('LOAD_MODEL_SOURCE') == "test":
+    if fake_data is False:
+        logger.info('Performing Inference')
         # categories, scores = Classifier().batch_assign_SciX_categories(record['text'])
         categories, scores = classifier.batch_assign_SciX_categories([record['text']])
+        record['categories'] = categories[0]
+        record['scores'] = scores[0]
         logger.info('Categories: {}'.format(categories))
         logger.info('Scores: {}'.format(scores))
         # import pdb; pdb.set_trace()
     # elif config.get('LOAD_MODEL_SOURCE') in app_sources:
     else:
-        record = app.score_record(record, fake_data=fake_data)
-    # record = app.score_record(record, fake_data=fake_data, model_dict=MODEL_DICT)
+        logger.info('Skipping inference - generating fake data')
+        record = utils.return_fake_data(record)
+
+    record['model'] = {'model' : config['CLASSIFICATION_PRETRAINED_MODEL'],
+                       'revision' : config['CLASSIFICATION_PRETRAINED_MODEL_REVISION'],
+                       'tokenizer' : config['CLASSIFICATION_PRETRAINED_MODEL_TOKENIZER']}
+
+    record['postprocessing'] = {'ADDITIONAL_EARTH_SCIENCE_PROCESSING' : True,
+                                'ADDITIONAL_EARTH_SCIENCE_PROCESSING_THRESHOLD' : 0.015,
+                                'CLASSIFICATION_THRESHOLDS' : [0.06, 0.03, 0.04, 0.02, 0.99, 0.02, 0.02, 0.99]}
+
+
+   # record = app.score_record(record, fake_data=fake_data, model_dict=MODEL_DICT)
 
     # Then classify the record based on the raw scores
     # import pdb; pdb.set_trace()
+    logger.info('RECORD: {}'.format(record))
+    # logger.info(record)
     record = app.classify_record_from_scores(record)
     # print('Collections: ')
     # print(message['collections'])
@@ -287,19 +278,19 @@ def task_send_input_record_to_classifier(message):
 
     # import pdb; pdb.set_trace()
     # Write the new classification to the database
+
     if delay_message:
         task_index_classified_record.delay(out_message)
     else:
         task_index_classified_record(out_message) 
-    # task_index_classified_record.delay(message)
-    # task_index_classified_record.apply_async(json.dumps(message))
-    # task_index_classified_record.apply_async(message)
-    # task_index_classified_record.apply_async(message)
+
 
     # import pdb; pdb.set_trace()
 
 
+
 @app.task(queue="classify-record")
+# @app.task(queue="update-record")
 def task_index_classified_record(message):
     """
     Update the database with the new classification
@@ -325,6 +316,8 @@ def task_index_classified_record(message):
     message = json.loads(message)
     record = message['classifyRequests'][0]
     logger.info(message)
+    # test_var = app.return_text('test_text')
+    # logger.info(f'Task preamble test var {test_var}')
     logger.info('Record type: {}'.format(type(message)))
 
     # if not delay_message:
@@ -333,7 +326,12 @@ def task_index_classified_record(message):
 
     # print('Indexing Classified Record')
     # import pdb; pdb.set_trace()
-    app.index_record(record)
+
+    record, success = app.index_record(record)
+    if success is True:
+        task_output_results(record)
+    else:
+        logger.info("Record failed to be indexed")
     # import pdb; pdb.set_trace()
     # pass
 
