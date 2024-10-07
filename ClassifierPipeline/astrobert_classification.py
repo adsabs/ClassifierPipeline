@@ -5,6 +5,8 @@ from adsputils import setup_logging, load_config
 
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from transformers import TokenClassificationPipeline
+import transformers
+transformers.logging.set_verbosity_debug()
 
 proj_home = os.path.realpath(os.path.join(os.path.dirname(__file__), "../"))
 

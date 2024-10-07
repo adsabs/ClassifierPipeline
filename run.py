@@ -32,11 +32,12 @@ import argparse
 # from ClassifierPipeline import classifier, tasks
 # from ClassifierPipeline import tasks
 # from ClassifierPipeline import app as app_module
-from ClassifierPipeline.tasks import task_update_record
+from ClassifierPipeline.tasks import task_update_record, task_update_validated_records
 from ClassifierPipeline import tasks
 # from ClassifierPipeline import classifier, tasks
 # from ADSOrcid import updater, tasks
 # from ADSOrcid.models import ClaimsLog, KeyValue, Records, AuthorInfo
+from ClassifierPipeline.utilities import check_is_allowed_category
 
 import classifyrecord_pb2
 from google.protobuf.json_format import Parse
@@ -64,6 +65,77 @@ logger = setup_logging('run.py', proj_home=proj_home,
 # MODEL_DICT = app.load_model_and_tokenizer()
 
 # =============================== FUNCTIONS ======================================= #
+
+def prepare_records(records_path, validate=True, tsv_output=True):
+    """
+    Takes a path to a .csv file of records and converts each record into a
+    dictionary with the following keys: bibcode and text (a combination of 
+    title and abstract). Sends each record to the classification queue.
+
+    Parameters
+    ----------
+    records_path : str (required) (default=None) Path to a .csv file of records
+
+    Returns
+    -------
+    no return
+    """
+    # Initial input columns: bibcode, title, abstract
+    # Corrected input columns:
+    # bibcode,title,abstract,categories,scores,collections,collection_scores,earth_science_adjustment,override
+    print('Processing records from: {}'.format(records_path))
+    print()
+
+
+    # Get run_id from filename
+    run_id = records_path.split('/')[-1]
+    run_id = int(run_id.split('_')[0])
+
+    # import pdb;pdb.set_trace()
+
+    with open(records_path, 'r') as f: 
+        csv_reader = csv.reader(f, delimiter='\t')
+        headers = next(csv_reader)
+
+        # Add run ID to record data
+        # run_id = time.time() 
+        # validate all records with same run_id
+        # import pdb;pdb.set_trace()
+
+        for row in csv_reader:
+            record = {}
+            record['bibcode'] = row[0]
+            record['title'] = row[1]
+            record['abstract'] = row[2]
+            record['text'] = row[1] + ' ' + row[2]
+            record['validate'] = validate
+            record['run_id'] = run_id
+            record['tsv_output'] = tsv_output
+
+            record['override'] = row[9].split(',')
+            run_id = row[3]
+            # import pdb;pdb.set_trace()
+            # For Testing
+            # Instead make a check of proper collections
+            allowed = check_is_allowed_category(record['override'])
+            if allowed:
+            # if is_allowed(record['override']):
+                pass
+                # tasks.task_index_classified_record(record)
+            # if not is_blank(record['override'][0]):
+                # pass
+                # task_index_classified_record(record)
+                # tasks.task_index_classified_record(record)
+            # For Production
+            # if not is_blank(record['override'][0]):
+                # tasks.task_index_classified_record.delay(record)
+
+            # print('testing message')
+            # import pdb;pdb.set_trace()
+            # Now send record to classification queue
+            # task_update_validated_records(run_id)
+            # tasks.task_update_validated_records(run_id)
+
 
 
 # =============================== MAIN ======================================= #
@@ -116,65 +188,34 @@ if __name__ == '__main__':
     # import pdb;pdb.set_trace()
     if args.validate:
         print("Validating records")
+        # import pdb;pdb.set_trace()
         prepare_records(records_path,validate=True)
 
     # import pdb;pdb.set_trace()
     if args.new_records:
         print("Processing new records")
         prepare_records(records_path)
-        # records = score_records(records_path)
 
-        # for record in records:
-            # print("Record: {}".format(record['bibcode']))
-            # print("Text: {}".format(record['text']))
-            # print("Categories: {}".format(record['categories']))
-            # print("Scores: {}".format(record['scores']))
-        # records = classify_records_from_scores(records)
-
-    # import pdb;pdb.set_trace
     if args.test:
-        print("Running tests")
-        # print('more tests')
-        # print('even more')
-        # import pdb;pdb.set_trace
-        # import pdb;pdb.set_trace
-        # logger.info("Running tests")
         logger.debug("Running tests")
-        logger.info("Dev Env")
+        logger.debug("Dev Env")
 
         # Remove delay for testing
         delay_message = config.get('DELAY_MESSAGE', True) 
 
-        logger.info("Delay set for queue messages: {}".format(delay_message))
-        logger.info("Config: TEST_INPUT_DATA: {}".format(config.get('TEST_INPUT_DATA')))
+        logger.debug("Delay set for queue messages: {}".format(delay_message))
+        logger.debug("Config: TEST_INPUT_DATA: {}".format(config.get('TEST_INPUT_DATA')))
 
-        # Read a protobuf from a
-        # with open('ClassifierPipeline/tests/stub_data/classifier_request_shorter.json', 'r') as f:
-        # with open('ClassifierPipeline/tests/stub_data/classifier_request_short.json', 'r') as f:
+        # Read a protobuf from file
         with open(config.get('TEST_INPUT_DATA'), 'r') as f:
             message_json = f.read()
-        # with open('ClassifierPipeline/tests/stub_data/classifier_request.json', 'r') as f:
-        #     message_json = f.read()
         
-        # message = classifyrecord_pb2.ClassifyRequestRecordList()
-        # Parse(message_json, message)
         
-        # import pdb;pdb.set_trace
-        logger.info('Message for testing: {}'.format(message_json))
-        # message = app.handle_input_from_master(message)
-        print('sending message')
+        logger.debug('Message for testing: {}'.format(message_json))
         if delay_message:
-            # pass
-            # message = tasks.task_update_record.delay(message_json)
             message = task_update_record.delay(message_json)
-        # message = tasks.task_update_record.delay(message_json)
         else: 
-            # pass
-            # message = tasks.task_update_record(message_json)
             message = task_update_record(message_json)
 
-        # import pdb;pdb.set_trace
 
-    # print("Done")
     logger.info("Done - run.py")
-    # import pdb;pdb.set_trace()

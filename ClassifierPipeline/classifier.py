@@ -126,7 +126,22 @@ class Classifier:
                 logger.info('Predictions with model {}'.format(self.model))
                 # logger.info('split_input_ids_with_tokens {}'.format(split_input_ids_with_tokens))
                 # import pdb; pdb.set_trace()
-                predictions = self.model(input_ids=tensor(split_input_ids_with_tokens)).logits.sigmoid()
+                try:
+                    logger.info('Really making predictions')
+                    predictions = self.model(input_ids=tensor(split_input_ids_with_tokens))
+                except Exception as e:
+                    logger.exception(f'Failed with: {str(e)}')
+                    raise e
+                try:
+                    logger.info('Really making predictions - really')
+                    predictions = predictions.logits.sigmoid()
+                except Exception as e:
+                    logger.exception(f'Failed with: {str(e)}')
+                # try:
+                #     logger.info('Really making predictions - really - I mean it')
+                #     predictions = predictions.sigmoid()
+                # except Exception as e:
+                #     logger.exception(f'Failed with: {str(e)}')
 
                 logger.info('Predictions {}'.format(predictions))
                 

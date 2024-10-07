@@ -27,11 +27,12 @@ FAKE_DATA = False
 
 
 #Data to Skip message from Master Pipeline
-# TEST_INPUT_DATA = 'ClassifierPipeline/tests/stub_data/classifier_request.json'
+TEST_INPUT_DATA = 'ClassifierPipeline/tests/stub_data/classifier_request.json'
 # TEST_INPUT_DATA = 'ClassifierPipeline/tests/stub_data/classifier_request_short.json'
-TEST_INPUT_DATA = 'ClassifierPipeline/tests/stub_data/classifier_request_shorter.json'
+# TEST_INPUT_DATA = 'ClassifierPipeline/tests/stub_data/classifier_request_shorter.json'
 # TEST_INPUT_DATA = '/app/ClassifierPipeline/ClassifierPipeline/tests/stub_data/classifier_request_shorter.json'
 
+ALLOWED_CATEGORIES = set(['astronomy', 'planetary science', 'heliophysics', 'earth science', 'physics', 'other physics', 'other'])
 # Thresholds for model checkpoint 32100
 # [Astrophysics, Heliophysics, Planetary Science, Earth Science, Biophysics, Other Physics, Other, Garbage]
 # [0.06, 0.03, 0.04, 0.02, 0.0, 0.02, 0.02, 0.0]

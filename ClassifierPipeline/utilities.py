@@ -35,6 +35,31 @@ def prepare_output_file(output_path,tsv_output=True):
         logger.info(f'Prepared {output_path} for writing.')
 
 
+def check_is_allowed_category(categories_list):
+    """
+    Check if provided categories are in list of approved categories
+
+    Parameters
+    ----------
+    categories_list : list (required) list of categories to check if allowed
+
+    Returns
+    ----------
+    True if all categories in approved
+    """
+    allowed = config.get('ALLOWED_CATEGORIES')
+
+    categories_list = [s.lower() for s in categories_list]
+
+    result = [element in allowed for element in categories_list]
+
+    # Only return True if all True
+    # May want ot revisit logig
+    if sum(result) == len(result):
+        return True
+    else:
+        return False
+
 def return_fake_data(record):
 # def score_record(self, record,fake_data=False):
     """
@@ -77,4 +102,43 @@ def return_fake_data(record):
 
     return record
 
+
+def extract_records_from_message(message):
+    """
+    Extract records from a message.
+
+    Parameters
+    ----------
+    message - protobuff defined serialized message
+
+    Returns
+    -------
+    record or list of records
+    """
+    parsed_message = json.loads(message)
+
+    record = parsed_message['classifyRequests'][0]
+
+    return record, parsed_message.copy()
+
+def package_records_to_message(record_list, out_message=None):
+    """
+    Package records in a message.
+
+    Parameters
+    ----------
+    list of records - can be single element list
+
+    Returns
+    -------
+    message - protobuff defined serialized message
+    """
+    if not_out_message:
+        # handle here
+        pass
+  
+    out_message['classifyRequests'] = [record]
+    return json.dumps(out_message)
+
+    # if not delay_message:
 

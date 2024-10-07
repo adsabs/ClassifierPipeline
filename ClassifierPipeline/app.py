@@ -127,68 +127,6 @@ class SciXClassifierCelery(ADSCelery):
             # For Production
             # tasks.task_send_input_record_to_classifier.delay(record)
 
-    def prepare_validation_records(records_path,validate=True, tsv_output=True):
-        """
-        Takes a path to a .csv file of records and converts each record into a
-        dictionary with the following keys: bibcode and text (a combination of 
-        title and abstract). Sends each record to the classification queue.
-
-        Parameters
-        ----------
-        records_path : str (required) (default=None) Path to a .csv file of records
-
-        Returns
-        -------
-        no return
-        """
-        # Open .csv file and read in records
-        # Note: that this method requres the input file to have the following
-        # Initial input columns: bibcode, title, abstract
-        # Corrected input columns:
-        # bibcode,title,abstract,categories,scores,collections,collection_scores,earth_science_adjustment,override
-        print('Processing records from: {}'.format(records_path))
-        print()
-
-
-        with open(records_path, 'r') as f: 
-            csv_reader = csv.reader(f, delimiter='\t')
-            headers = next(csv_reader)
-
-            # Add run ID to record data
-            # run_id = time.time() 
-            # validate all records with same run_id
-            # import pdb;pdb.set_trace()
-
-            for row in csv_reader:
-                record = {}
-                record['bibcode'] = row[0]
-                record['title'] = row[1]
-                record['abstract'] = row[2]
-                record['text'] = row[1] + ' ' + row[2]
-                record['validate'] = validate
-                record['run_id'] = run_id
-                record['tsv_output'] = tsv_output
-
-                record['override'] = row[9].split(',')
-                run_id = row[3]
-                # For Testing
-                # Instead make a check of proper collections
-                # if is_allowed(record['override']):
-                #     tasks.task_index_classified_record(record)
-                # if not is_blank(record['override'][0]):
-                    # pass
-                    # task_index_classified_record(record)
-                    # tasks.task_index_classified_record(record)
-                # For Production
-                # if not is_blank(record['override'][0]):
-                #     tasks.task_index_classified_record.delay(record)
-
-                # print('testing message')
-                # import pdb;pdb.set_trace()
-                # Now send record to classification queue
-            # task_update_validated_records(run_id)
-            # tasks.task_update_validated_records(run_id)
-
 
 
     def score_record(self, record, model_dict=None,fake_data=False):

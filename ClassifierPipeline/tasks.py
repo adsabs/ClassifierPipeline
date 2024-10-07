@@ -1,69 +1,40 @@
 import sys
 import os
 import json
-import pickle
-# from __future__ import absolute_import, unicode_literals
 import adsputils
 from adsputils import ADSCelery
-# from adsmsg import OrcidClaims
-# from SciXClassifier import app as app_module
-# from SciXClassifier import updater
-# from SciXClassifier.exceptions import ProcessingException, IgnorableException
-# from SciXClassifier.models import KeyValue
-# from .app import SciXClassifierCelery
 import ClassifierPipeline.app as app_module
 import ClassifierPipeline.utilities as utils
 from ClassifierPipeline.classifier import Classifier
 from adsputils import load_config, setup_logging
 from kombu import Queue
-# import datetime
-# from .classifier import score_record
-# sys.path.append(os.path.abspath('../..'))
-# from run import score_record, classify_record_from_scores, add_record_to_output_file
 import classifyrecord_pb2
 from google.protobuf.json_format import Parse
 
 from sqlalchemy.orm import scoped_session
 from sqlalchemy.orm import sessionmaker
-# import pdb;pdb.set_trace()
 # ============================= INITIALIZATION ==================================== #
 
 proj_home = os.path.realpath(os.path.join(os.path.dirname(__file__), "../"))
 app = app_module.SciXClassifierCelery(
-        # app = SciXClassifierCelery(
-    # "scixclassifier-pipeline",
     "classifier-pipeline",
     proj_home=proj_home,
     local_config=globals().get("local_config", {}),
 )
-# import pdb; pdb.set_trace()
-# from adsputils import setup_logging, load_config
 config = load_config(proj_home=proj_home)
 logger = setup_logging('tasks.py', proj_home=proj_home,
                         level=config.get('LOGGING_LEVEL', 'INFO'),
                         attach_stdout=config.get('LOG_STDOUT', True))
 
 app.conf.CELERY_QUEUES = (
-    Queue("classify-record", app.exchange, routing_key="classify-record"),
-    Queue("update-record", app.exchange, routing_key="update-record")
+    Queue("update-record", app.exchange, routing_key="update-record"),
+    # Queue("classify-record", app.exchange, routing_key="classify-record"),
+    # Queue("classify-record", app.exchange, routing_key="index-record")
 )
-# logger = app.logger
 
 classifier = Classifier()
 
-
 # ============================= TASKS ============================================= #
-
-# From Curators Daily Operations 
-
-# Send data to the Classifier
-
-# Populate database wit new data
-
-# Return sorted classifications to Curators
-
-# Query SOLR
-#   - Finding records with given set of parameters (e.g. classification, model, etc.)
 
 @app.task(queue="update-record")
 # def task_handle_input_from_master(message):
@@ -131,8 +102,9 @@ def task_update_record(message, tsv_output=True):
 
     # logger.info('Message to be parsed: {}'.format(message))
     parsed_message = json.loads(message)
-
     request_list = parsed_message['classifyRequests']
+
+    # request_list, out_message = utils.extract_records_from_message(message)
 
 
     # for request in message.classify_requests:
@@ -155,8 +127,8 @@ def task_update_record(message, tsv_output=True):
         out_message = parsed_message.copy()
         out_message['classifyRequests'] = [record] # protobuf is for list of dictionaries
         # import pdb;pdb.set_trace()
-        # out_message = json.dumps(out_message)
         out_message = json.dumps(out_message)
+        # out_message = utils.package_records_to_message(record_list, out_message=out_message)
         # import pdb;pdb.set_trace()
 
         # if not delay_message:
@@ -175,8 +147,8 @@ def task_update_record(message, tsv_output=True):
             
 
 # @app.task(queue="unclassified-queue")
-# @app.task(queue="update-record")
-@app.task(queue="classify-record")
+@app.task(queue="update-record")
+# @app.task(queue="classify-record")
 def task_send_input_record_to_classifier(message):
     """
     Send a new record to the classifier
@@ -289,8 +261,8 @@ def task_send_input_record_to_classifier(message):
 
 
 
-@app.task(queue="classify-record")
-# @app.task(queue="update-record")
+# @app.task(queue="classify-record")
+@app.task(queue="update-record")
 def task_index_classified_record(message):
     """
     Update the database with the new classification
@@ -330,13 +302,14 @@ def task_index_classified_record(message):
     record, success = app.index_record(record)
     if success is True:
         logger.info("Record indexed, outputting results")
-        # task_output_results(record)
+        task_output_results(record)
     else:
         logger.info("Record failed to be indexed")
     # import pdb; pdb.set_trace()
     # pass
 
 # @app.task(queue="classify-record")
+# @app.task(queue="update-record")
 def task_update_validated_records(message):
     """
     Update all records that have been validated that have same run_id
@@ -348,6 +321,7 @@ def task_update_validated_records(message):
     """
 
     # print('Updating Validated Records')
+    logger.info("Updating Validated Record")
     app.update_validated_records(message)
     # import pdb; pdb.set_trace()
     # pass
@@ -355,6 +329,7 @@ def task_update_validated_records(message):
 
 # @app.task(queue="output-results")
 # @app.task(queue="classify-record")
+@app.task(queue="update-record")
 def task_output_results(message):
     """
     This worker will forward results to the outside
