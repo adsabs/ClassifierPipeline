@@ -16,8 +16,9 @@ import os
 import csv
 # import sys
 import time
-# import json
+import json
 import argparse
+import copy
 # import logging
 # import traceback
 # import warnings
@@ -65,6 +66,36 @@ logger = setup_logging('run.py', proj_home=proj_home,
 # MODEL_DICT = app.load_model_and_tokenizer()
 
 # =============================== FUNCTIONS ======================================= #
+
+def record2protobuf(record):
+    """
+    Take an input dictionary and return a protobuf containing the dictionary
+
+    Parameters
+    ----------
+    record : dict (required) dictionary with record information
+
+    Returns
+    -------
+    protobuf
+    """
+
+    # message = classifyrecord_pb2.ClassifyRequestRecordList()
+    # message['classifyRequests'] = input_list
+    # message = json.dumps(message)
+    # import pdb;pdb.set_trace()
+    with open(config.get('TEST_INPUT_DATA'), 'r') as f:
+        message_json = f.read()
+
+    parsed_message = json.loads(message_json)
+    request_list = parsed_message['classifyRequests']
+    
+    out_message = parsed_message.copy()
+    out_message['classifyRequests'] = [record] # protobuf is for list of dictionaries
+    # import pdb;pdb.set_trace()
+    out_message = json.dumps(out_message)
+
+    return out_message
 
 def prepare_records(records_path, validate=True, tsv_output=True):
     """
@@ -120,8 +151,10 @@ def prepare_records(records_path, validate=True, tsv_output=True):
             allowed = check_is_allowed_category(record['override'])
             if allowed:
             # if is_allowed(record['override']):
-                pass
-                # tasks.task_index_classified_record(record)
+                # pass
+                record = record2protobuf(record)
+                # import pdb;pdb.set_trace()
+                tasks.task_index_classified_record(record)
             # if not is_blank(record['override'][0]):
                 # pass
                 # task_index_classified_record(record)
@@ -134,7 +167,7 @@ def prepare_records(records_path, validate=True, tsv_output=True):
             # import pdb;pdb.set_trace()
             # Now send record to classification queue
             # task_update_validated_records(run_id)
-            # tasks.task_update_validated_records(run_id)
+            tasks.task_update_validated_records(run_id)
 
 
 
@@ -187,6 +220,8 @@ if __name__ == '__main__':
 
     # import pdb;pdb.set_trace()
     if args.validate:
+        # For testing : 
+        # python3 run.py -v -r /app/logs/157_classified_corrected.tsv
         print("Validating records")
         # import pdb;pdb.set_trace()
         prepare_records(records_path,validate=True)
