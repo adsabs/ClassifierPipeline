@@ -145,28 +145,14 @@ def prepare_records(records_path, validate=True, tsv_output=True):
 
             record['override'] = row[9].split(',')
             run_id = row[3]
-            # import pdb;pdb.set_trace()
-            # For Testing
-            # Instead make a check of proper collections
+            # make a check of proper collections
             allowed = check_is_allowed_category(record['override'])
             if allowed:
-            # if is_allowed(record['override']):
-                # pass
                 record = record2protobuf(record)
-                # import pdb;pdb.set_trace()
                 tasks.task_index_classified_record(record)
-            # if not is_blank(record['override'][0]):
-                # pass
-                # task_index_classified_record(record)
-                # tasks.task_index_classified_record(record)
-            # For Production
-            # if not is_blank(record['override'][0]):
-                # tasks.task_index_classified_record.delay(record)
 
-            # print('testing message')
-            # import pdb;pdb.set_trace()
-            # Now send record to classification queue
-            # task_update_validated_records(run_id)
+            # Records that do not need an override
+            # are marked as validated
             tasks.task_update_validated_records(run_id)
 
 
@@ -248,7 +234,7 @@ if __name__ == '__main__':
         
         logger.debug('Message for testing: {}'.format(message_json))
         if delay_message:
-            message = task_update_record.delay(message_json)
+            message = task_update_record.delay(message_json,pipeline='test')
         else: 
             message = task_update_record(message_json)
 

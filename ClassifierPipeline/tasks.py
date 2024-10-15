@@ -9,7 +9,7 @@ from ClassifierPipeline.classifier import Classifier
 from adsputils import load_config, setup_logging
 from kombu import Queue
 import classifyrecord_pb2
-from google.protobuf.json_format import Parse
+from google.protobuf.json_format import Parse, MessageToDict
 
 from sqlalchemy.orm import scoped_session
 from sqlalchemy.orm import sessionmaker
@@ -38,7 +38,8 @@ classifier = Classifier()
 
 @app.task(queue="update-record")
 # def task_handle_input_from_master(message):
-def task_update_record(message, tsv_output=True):
+# def task_update_record(message,pipeline, tsv_output=True):
+def task_update_record(message,pipeline=None, tsv_output=True):
     """
     Handle the input from the master
 
@@ -57,20 +58,13 @@ def task_update_record(message, tsv_output=True):
     :param: message - dictionary
     """
 
-    # Check if input is single bibcode or path to file of bibcodes, title and abstracts
-    # print('Handling input from master')
-    # import pdb;pdb.set_trace()
-    # tasks.task_send_input_record_to_classifier(message)
-
-    # If batch of bibcodes
-    # if message is type('classifyrecord_pb2.ClassifyRequestRecordList'):
-    # if message.classify_requests:
     # Always pass a list of records, even just a list of one record
     # if isinstance(message, classifyrecord_pb2.ClassifyRequestRecordList):
     # if message is type(list):
     logger.info('********************************************')
     logger.info('*** task_update_record ***')
-    # logger.info('Batch of bibcodes')
+    logger.info(f'Message type: {type(message)}')
+    logger.info(f'Message: {message}')
     output_path = ''
 
     # import pdb;pdb.set_trace()
@@ -99,18 +93,36 @@ def task_update_record(message, tsv_output=True):
     delay_message = config.get('DELAY_MESSAGE', False) 
 
     logger.info("Delay set for queue messages: {}".format(delay_message))
+    logger.info("Pipeline used: {}".format(pipeline))
 
     # logger.info('Message to be parsed: {}'.format(message))
-    parsed_message = json.loads(message)
-    request_list = parsed_message['classifyRequests']
+    if pipeline == 'test':
+        parsed_message = json.loads(message)
+        request_list = parsed_message['classifyRequests']
+    if pipeline == 'classifier':
+        logger.info(f'Message contents: {message.classify_requests}')
+        # open_message = classifyrecord_pb2.ClassifyRequestRecordList()
+        # open_message.ParseFromString(message)
+        # request_list = open_message.classify_requests
+        request_list = message.classify_requests
+        logger.info(f"Request List: {request_list}")
+        request_list = [MessageToDict(request) for request in request_list]
+        logger.info(f"Request List (dictionaries): {request_list}")
+        
+        # Needed until protobuff defines all processing data
+        with open(config.get('TEST_INPUT_DATA'), 'r') as f:
+            message_json = f.read()
+            parsed_message = json.loads(message_json)
 
     # request_list, out_message = utils.extract_records_from_message(message)
 
 
     # for request in message.classify_requests:
-    # logger.info('Request list: {}'.format(request_list))
+    logger.info('Request list: {}'.format(request_list))
     for request in request_list:
         logger.info('Request: {}'.format(request))
+        # request = MessageToDict(request)
+        # logger.info('Request as Dictionary: {}'.format(request))
         record = {'bibcode': request['bibcode'],
                   'title': request['title'],
                   'abstract': request['abstract'],
@@ -124,6 +136,7 @@ def task_update_record(message, tsv_output=True):
                   }
 
         # import pdb;pdb.set_trace()
+        logger.info("creating output message")
         out_message = parsed_message.copy()
         out_message['classifyRequests'] = [record] # protobuf is for list of dictionaries
         # import pdb;pdb.set_trace()
