@@ -39,7 +39,7 @@ classifier = Classifier()
 @app.task(queue="update-record")
 # def task_handle_input_from_master(message):
 # def task_update_record(message,pipeline, tsv_output=True):
-def task_update_record(message,pipeline=None, tsv_output=True):
+def task_update_record(message,test_message=False, tsv_output=True):
     """
     Handle the input from the master
 
@@ -93,13 +93,13 @@ def task_update_record(message,pipeline=None, tsv_output=True):
     delay_message = config.get('DELAY_MESSAGE', False) 
 
     logger.info("Delay set for queue messages: {}".format(delay_message))
-    logger.info("Pipeline used: {}".format(pipeline))
 
     # logger.info('Message to be parsed: {}'.format(message))
-    if pipeline == 'test':
+    if test_message is True:
+        logger.info("Test message being used")
         parsed_message = json.loads(message)
         request_list = parsed_message['classifyRequests']
-    if pipeline == 'classifier':
+    else:
         logger.info(f'Message contents: {message.classify_requests}')
         # open_message = classifyrecord_pb2.ClassifyRequestRecordList()
         # open_message.ParseFromString(message)

@@ -4,6 +4,9 @@ import pickle
 import zlib
 import csv
 
+from google.protobuf.json_format import Parse, MessageToDict
+from adsmsg import ClassifyRequestRecordList
+
 from adsputils import get_date, ADSCelery, u2asc
 from adsputils import load_config, setup_logging
 
@@ -101,6 +104,38 @@ def return_fake_data(record):
 
 
     return record
+
+def list_to_message(input_list):
+    """
+    Convert a list of dictionaries to a protobuf message'
+    """
+
+    message = ClassifyRequestRecordList()
+    # import pdb;pdb.set_trace()
+    for item in input_list:
+        entry = message.classify_requests.add()
+        entry.bibcode = item.get('bibcode')
+        entry.title = item.get('title')
+        entry.abstract = item.get('abstract')
+
+    # import pdb;pdb.set_trace()
+    return message
+
+def message_to_list(message):
+    """
+    Convert a protobuf ClassifyRequestRecordList to a list of dictionaries.
+    """
+
+    output_list = []
+    request_list = message.classify_requests
+    for request in request_list:
+        output_list.append(MessageToDict(request))
+
+    # import pdb;pdb.set_trace()
+
+    return output_list
+
+
 
 
 def extract_records_from_message(message):
