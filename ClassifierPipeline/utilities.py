@@ -25,7 +25,6 @@ def prepare_output_file(output_path,tsv_output=True):
     """
     logger.info('Preparing output file - utilities.py')
 
-    # header = 'bibcode,title,abstract,run_id,categories,scores,collections,collection_scores,earth_science_adjustment,override\n'
     header = ['bibcode','title','abstract','run_id','categories','scores','collections','collection_scores','earth_science_adjustment','override']
 
     with open(output_path, 'w', newline='') as file:
@@ -34,7 +33,6 @@ def prepare_output_file(output_path,tsv_output=True):
         else:
             writer = csv.writer(file)
         writer.writerow(header)
-        # file.write('\t'.join(header) + '\n')
         logger.info(f'Prepared {output_path} for writing.')
 
 
@@ -57,14 +55,12 @@ def check_is_allowed_category(categories_list):
     result = [element in allowed for element in categories_list]
 
     # Only return True if all True
-    # May want ot revisit logig
     if sum(result) == len(result):
         return True
     else:
         return False
 
 def return_fake_data(record):
-# def score_record(self, record,fake_data=False):
     """
     Provide classification scores for a record using the following
         categories:

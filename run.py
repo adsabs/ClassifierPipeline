@@ -236,9 +236,9 @@ if __name__ == '__main__':
 
         logger.debug('Message for testing: {}'.format(message_json))
         if delay_message:
-            message = task_update_record.delay(message_json,test_message=True)
+            message = task_update_record.delay(message_json,pipeline='test')
         else:
-            message = task_update_record(message_json,test_message=True)
+            message = task_update_record(message_json,pipeline='test')
 
 
     logger.info("Done - run.py")
