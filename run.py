@@ -118,7 +118,7 @@ def records2_fake_protobuf(record):
 
     return out_message
 
-def prepare_records(records_path, validate=True, tsv_output=True):
+def prepare_records(records_path, operation_step='validate'):
     """
     Takes a path to a .csv file of records and converts each record into a
     dictionary to be sent to the classification queu to be sent to the
@@ -150,9 +150,8 @@ def prepare_records(records_path, validate=True, tsv_output=True):
             record['title'] = row[1]
             record['abstract'] = row[2]
             record['text'] = row[1] + ' ' + row[2]
-            record['validate'] = validate
+            record['operation_step'] = operation_step
             record['run_id'] = run_id
-            record['tsv_output'] = tsv_output
 
             record['override'] = row[9].split(',')
             run_id = row[3]
@@ -213,7 +212,7 @@ if __name__ == '__main__':
 
     if args.validate:
         print("Validating records")
-        prepare_records(records_path,validate=True)
+        prepare_records(records_path,operation_step='validate')
 
     if args.new_records:
         print("Processing new records")

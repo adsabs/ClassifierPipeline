@@ -37,9 +37,7 @@ classifier = Classifier()
 # ============================= TASKS ============================================= #
 
 @app.task(queue="update-record")
-# def task_handle_input_from_master(message):
-# def task_update_record(message,pipeline, tsv_output=True):
-def task_update_record(message,pipeline='classifier', tsv_output=True):
+def task_update_record(message,pipeline='classifier', output_format='tsv'):
     """
     Handle the input from the master
 
@@ -65,14 +63,14 @@ def task_update_record(message,pipeline='classifier', tsv_output=True):
 
     run_id = app.index_run()
     logger.info('Run ID: {}'.format(run_id))
-    validate = False
-    if tsv_output:
+    operation_step = 'classify'
+    if output_format == 'tsv':
         output_path = os.path.join(proj_home, 'logs', f'{run_id}_classified.tsv')
     else:
         output_path = os.path.join(proj_home, 'logs', f'{run_id}_classified.csv')
 
     logger.info('Preparing output file: {}'.format(output_path))
-    utils.prepare_output_file(output_path,tsv_output=tsv_output)
+    utils.prepare_output_file(output_path,output_format=output_format)
     logger.info('Output file prepared')
 
     # Delay setting
@@ -105,12 +103,11 @@ def task_update_record(message,pipeline='classifier', tsv_output=True):
                   'title': request['title'],
                   'abstract': request['abstract'],
                   'text': request['title'] + ' ' + request['abstract'],
-                  'validate': validate,
+                  'operation_step': operation_step,
                   'run_id': run_id,
-                  'tsv_output': tsv_output,
+                  'output_format': output_format,
                   'override': None,
-                  'output_path': output_path#,
-                  # 'model_dict' : model_dict
+                  'output_path': output_path
                   }
 
         # only needed for test protobuf - remove after updating protobuf
@@ -174,13 +171,13 @@ def task_send_input_record_to_classifier(message):
         record = utils.return_fake_data(record)
 
     # Add model and classification information to record
-    record['model'] = {'model' : config['CLASSIFICATION_PRETRAINED_MODEL'],
-                       'revision' : config['CLASSIFICATION_PRETRAINED_MODEL_REVISION'],
-                       'tokenizer' : config['CLASSIFICATION_PRETRAINED_MODEL_TOKENIZER']}
+    record['model'] = config['CLASSIFICATION_PRETRAINED_MODEL'],
+    record['revision'] =  config['CLASSIFICATION_PRETRAINED_MODEL_REVISION'],
+    record['tokenizer'] = config['CLASSIFICATION_PRETRAINED_MODEL_TOKENIZER']
 
-    record['postprocessing'] = {'ADDITIONAL_EARTH_SCIENCE_PROCESSING' : config['ADDITIONAL_EARTH_SCIENCE_PROCESSING'],
-                                'ADDITIONAL_EARTH_SCIENCE_PROCESSING_THRESHOLD' : config['ADDITIONAL_EARTH_SCIENCE_PROCESSING_THRESHOLD'],
-                                'CLASSIFICATION_THRESHOLDS' : config['CLASSIFICATION_THRESHOLDS']}
+    record['ADDITIONAL_EARTH_SCIENCE_PROCESSING'] = config['ADDITIONAL_EARTH_SCIENCE_PROCESSING']
+    record['ADDITIONAL_EARTH_SCIENCE_PROCESSING_THRESHOLD'] = config['ADDITIONAL_EARTH_SCIENCE_PROCESSING_THRESHOLD']
+    record['CLASSIFICATION_THRESHOLDS'] = config['CLASSIFICATION_THRESHOLDS']
 
 
 
@@ -216,7 +213,7 @@ def task_index_classified_record(message):
          'bibcode': String (19 chars),
          'collections': [String],
          'abstract':String,
-         'validate': Boolean,
+         'operation_step': String,
          'override': String
         }
     :return: no return
@@ -279,7 +276,8 @@ def task_output_results(message):
     logger.info(message)
     app.add_record_to_output_file(message)
     logger.info(f'Message: {message}')
-    # app.forward_to_master(message)
+    # app.forward_message(output_message)
+
 
 
 

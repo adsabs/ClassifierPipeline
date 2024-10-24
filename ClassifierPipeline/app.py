@@ -76,7 +76,7 @@ class SciXClassifierCelery(ADSCelery):
 
         # Extra step to check for "Earth Science" articles miscategorized as "Other"
         # This is expected to be less neccessary with improved training data
-        if config['ADDITIONAL_EARTH_SCIENCE_PROCESSING'] is True:
+        if config['ADDITIONAL_EARTH_SCIENCE_PROCESSING'] == 'active':
             logger.info('Additional Earth Science Processing')
             if meet_threshold[categories.index('Other')] is True:
                 # If Earth Science score above additional threshold
@@ -95,7 +95,7 @@ class SciXClassifierCelery(ADSCelery):
         return record
 
 
-    def prepare_output_file(self, output_path,tsv_output=True):
+    def prepare_output_file(self, output_path,output_format='tsv'):
         """
         Prepares an output file
         """
@@ -103,10 +103,7 @@ class SciXClassifierCelery(ADSCelery):
         header = ['bibcode','title','abstract','run_id','categories','scores','collections','collection_scores','earth_science_adjustment','override']
 
         with open(output_path, 'w', newline='') as file:
-            if tsv_output:
-                writer = csv.writer(file, delimiter='\t')
-            else:
-                writer = csv.writer(file)
+            writer = csv.writer(file, delimiter='\t')
             writer.writerow(header)
 
         logger.info(f'Prepared {output_path} for writing.')
@@ -119,10 +116,7 @@ class SciXClassifierCelery(ADSCelery):
         row = [record['bibcode'], record['title'], record['abstract'],record['run_id'], ', '.join(record['categories']), ', '.join(map(str,record['scores'])), ', '.join(record['collections']), ', '.join(map(str, record['collection_scores'])), record['earth_science_adjustment'], '']
 
         with open(record['output_path'], 'a', newline='') as file:
-            if record['tsv_output']:
-                writer = csv.writer(file, delimiter='\t')
-            else:
-                writer = csv.writer(file)
+            writer = csv.writer(file, delimiter='\t')
             writer.writerow(row)
 
 
@@ -157,15 +151,23 @@ class SciXClassifierCelery(ADSCelery):
         with self.session_scope() as session:
 
             # Initial indexing of automatic classification results
-            if record['validate'] is False:
+            if record['operation_step'] == 'classify':
                 logger.info('Indexing new record')
 
                 # Model Table
-                model_row = models.ModelTable(model=json.dumps(record['model']),
-                                              postprocessing=json.dumps(record['postprocessing'])
+                model = {'model' : config['Classification_Pretrained_Model'],
+                         'revision' : config['Classification_Pretrained_Model_Revision'],
+                         'tokenizer' : config['Classification_Pretrained_Model_Tokenizer']
+                         }
+                postprocessing = {'ADDITIONAL_EARTH_SCIENCE_PROCESSING' : config['ADDITIONAL_EARTH_SCIENCE_PROCESSING'],
+                                  'ADDITIONAL_EARTH_SCIENCE_PROCESSING_THRESHOLD' : config['ADDITIONAL_EARTH_SCIENCE_PROCESSING_THRESHOLD'],
+                                  'CLASSIFICATION_THRESHOLDS' : config['CLASSIFICATION_THRESHOLDS']
+                                  }
+                model_row = models.ModelTable(model=json.dumps(model),
+                                              postprocessing=json.dumps(postprocessing)
                                               )
 
-                check_model_query = session.query(models.ModelTable).filter(and_(models.ModelTable.model == json.dumps(record['model']), models.ModelTable.postprocessing == json.dumps(record['postprocessing']))).order_by(models.ModelTable.created.desc()).first()
+                check_model_query = session.query(models.ModelTable).filter(and_(models.ModelTable.model == json.dumps(model), models.ModelTable.postprocessing == json.dumps(postprocessing))).order_by(models.ModelTable.created.desc()).first()
 
                 if check_model_query is None:
                     session.add(model_row)
@@ -195,7 +197,7 @@ class SciXClassifierCelery(ADSCelery):
 
                 # Scores Table
                 scores = {'scores': {cat:score for cat, score in zip(record['categories'], record['scores'])},
-                          'earth_science_adjustment': record['earth_science_adjustment'],
+                          'earth_science_adjustment': config['ADDITIONAL_EARTH_SCIENCE_PROCESSING'],
                           'collections': record['collections']}
 
                 score_row = models.ScoreTable(bibcode=record['bibcode'], 
@@ -251,7 +253,7 @@ class SciXClassifierCelery(ADSCelery):
                     update_final_collection_query = session.query(models.FinalCollectionTable).filter(models.FinalCollectionTable.bibcode == record['bibcode']).order_by(models.FinalCollectionTable.created.desc()).first()
 
                     update_final_collection_query.collection = record['override']
-                    update_final_collection_query.validated = record['validate']
+                    update_final_collection_query.validated = True
                     session.commit()
 
                 return record, False
