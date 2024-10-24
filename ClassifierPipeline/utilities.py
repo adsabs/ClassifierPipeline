@@ -19,7 +19,7 @@ logger = setup_logging('utilities.py', proj_home=proj_home,
                         attach_stdout=config.get('LOG_STDOUT', True))
 
 
-def prepare_output_file(output_path,output_format='tsv'):
+def prepare_output_file(output_path):
     """
     Prepares an output file
     """
@@ -28,12 +28,9 @@ def prepare_output_file(output_path,output_format='tsv'):
     header = ['bibcode','title','abstract','run_id','categories','scores','collections','collection_scores','earth_science_adjustment','override']
 
     with open(output_path, 'w', newline='') as file:
-        if output_format == 'tsv':
-            writer = csv.writer(file, delimiter='\t')
-        else:
-            writer = csv.writer(file)
+        writer = csv.writer(file, delimiter='\t')
         writer.writerow(header)
-        logger.info(f'Prepared {output_path} for writing.')
+    logger.info(f'Prepared {output_path} for writing.')
 
 
 def check_is_allowed_category(categories_list):
@@ -62,19 +59,11 @@ def check_is_allowed_category(categories_list):
 
 def return_fake_data(record):
     """
-    Provide classification scores for a record using the following
-        categories:
-            0 - Astronomy
-            1 - HelioPhysics
-            2 - Planetary Science
-            3 - Earth Science
-            4 - Biological and Physical Sciences
-            5 - Other Physics
-            6 - Other
-            7 - Garbage
+    Return fake data as a stand in for classifier results.  Use for debugging.
 
     Parameters
     ----------
+    record : dict (required) Dictionary of record information
     records_path : str (required) (default=None) Path to a .csv file of records
 
     Returns
@@ -107,14 +96,58 @@ def list_to_message(input_list):
     """
 
     message = ClassifyRequestRecordList()
-    # import pdb;pdb.set_trace()
+
     for item in input_list:
         entry = message.classify_requests.add()
-        entry.bibcode = item.get('bibcode')
-        entry.title = item.get('title')
-        entry.abstract = item.get('abstract')
+        try:
+            entry.bibcode = item.get('bibcode')
+        except:
+            entry.bibcode = None
+        try:
+            entry.scix_id = item.get('scix_id')
+        except:
+            entry.scix_id = None
+        try:
+            entry.status = item.get('status')
+        except:
+            entry.status = None
+        try:
+            entry.title = item.get('title')
+        except:
+            entry.title = None
+        try:
+            entry.abstract = item.get('abstract')
+        except:
+            entry.abstract = None
+        try:
+            entry.operation_step = item.get('operation_step')
+        except:
+            entry.operation_step = None
+        try:
+            entry.run_id = item.get('run_id')
+        except:
+            entry.run_id = None
+        try:
+            entry.override = item.get('override')
+        except:
+            entry.override = None
+        try:
+            entry.output_path = item.get('output_path')
+        except:
+            entry.output_path = None
+        try:
+            entry.scores = item.get('scores')
+        except:
+            entry.scores = None
+        try:
+            entry.collections = item.get('collections')
+        except:
+            entry.collections = None
+        try:
+            entry.collection_scores = item.get('collection_scores')
+        except:
+            entry.collection_scores = None
 
-    # import pdb;pdb.set_trace()
     return message
 
 def list_to_output_message(input_list):
@@ -126,6 +159,27 @@ def list_to_output_message(input_list):
 
     message = ClassifyResponseRecordList()
 
+    for item in input_list:
+        entry = message.classify_requests.add()
+        try:
+            entry.bibcode = item.get('bibcode')
+        except:
+            entry.bibcode = None
+        try:
+            entry.scix_id = item.get('scix_id')
+        except:
+            entry.scix_id = None
+        try:
+            entry.status = item.get('status')
+        except:
+            entry.status = None
+        try:
+            entry.status = item.get('collections')
+        except:
+            entry.status = None
+
+    return message
+     
 
 def message_to_list(message):
     """
@@ -146,7 +200,7 @@ def message_to_list(message):
 
 def extract_records_from_message(message):
     """
-    Extract records from a message.
+    Extract records from a message. Use with json fake messages.
 
     Parameters
     ----------
@@ -164,7 +218,7 @@ def extract_records_from_message(message):
 
 def package_records_to_message(record_list, out_message=None):
     """
-    Package records in a message.
+    Package records in a message. Use with json fake messages.
 
     Parameters
     ----------
