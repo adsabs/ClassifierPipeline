@@ -66,7 +66,7 @@ class SciXClassifierCelery(ADSCelery):
 
         # Fetch thresholds from config file
         thresholds = config['CLASSIFICATION_THRESHOLDS']
-        logger.info('Classification Thresholds: {}'.format(thresholds))
+        logger.info(f'Classification Thresholds: {thresholds}')
 
 
         scores = record['scores']
@@ -89,13 +89,12 @@ class SciXClassifierCelery(ADSCelery):
         record['collections'] = [category for category, threshold in zip(categories, meet_threshold) if threshold is True]
         record['collection_scores'] = [score for score, threshold in zip(scores, meet_threshold) if threshold is True]
         record['collection_scores'] = [round(score, 2) for score in record['collection_scores']]
-        record['earth_science_adjustment'] = config['ADDITIONAL_EARTH_SCIENCE_PROCESSING']
 
 
         return record
 
 
-    def prepare_output_file(self, output_path,output_format='tsv'):
+    def prepare_output_file(self, output_path):
         """
         Prepares an output file
         """
@@ -113,7 +112,7 @@ class SciXClassifierCelery(ADSCelery):
         """
         Adds a record to the output file
         """
-        row = [record['bibcode'], record['title'], record['abstract'],record['run_id'], ', '.join(record['categories']), ', '.join(map(str,record['scores'])), ', '.join(record['collections']), ', '.join(map(str, record['collection_scores'])), record['earth_science_adjustment'], '']
+        row = [record['bibcode'], record['title'], record['abstract'],record['run_id'], ', '.join(record['categories']), ', '.join(map(str,record['scores'])), ', '.join(record['collections']), ', '.join(map(str, record['collection_scores'])), config['ADDITIONAL_EARTH_SCIENCE_PROCESSING'], '']
 
         with open(record['output_path'], 'a', newline='') as file:
             writer = csv.writer(file, delimiter='\t')
@@ -125,7 +124,7 @@ class SciXClassifierCelery(ADSCelery):
         Indexes a run into a database
 
         :param: none 
-        :return: tuple (record, boolean: True if successful index)
+        :return: str Run table row ID
         """
         with self.session_scope() as session:
 

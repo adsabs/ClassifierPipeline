@@ -57,17 +57,13 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
     """
 
     # Always pass a list of records, even just a list of one record
-    logger.info(f'Message type: {type(message)}')
-    logger.info(f'Message: {message}')
-    output_path = ''
+    logger.debug(f'Message type: {type(message)}')
+    logger.debug(f'Message: {message}')
 
     run_id = app.index_run()
     logger.info('Run ID: {}'.format(run_id))
     operation_step = 'classify'
-    if output_format == 'tsv':
-        output_path = os.path.join(proj_home, 'logs', f'{run_id}_classified.tsv')
-    else:
-        output_path = os.path.join(proj_home, 'logs', f'{run_id}_classified.csv')
+    output_path = os.path.join(proj_home, 'logs', f'{run_id}_classified.tsv')
 
     logger.info('Preparing output file: {}'.format(output_path))
     utils.prepare_output_file(output_path,output_format=output_format)
@@ -76,27 +72,11 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
     # Delay setting
     delay_message = config.get('DELAY_MESSAGE', False) 
 
-    logger.info("Delay set for queue messages: {}".format(delay_message))
+    logger.debug("Delay set for queue messages: {}".format(delay_message))
 
-    # Needed for the test message - test aspect should be removed
-    if pipeline =='classifier':
-        request_list = message.classify_requests
-        logger.info(f"Request List: {request_list}")
-        request_list = [MessageToDict(request) for request in request_list]
-        logger.info(f"Request List (dictionaries): {request_list}")
-        
-        # Needed until protobuff defines all processing data
-        with open(config.get('TEST_INPUT_DATA'), 'r') as f:
-            message_json = f.read()
-            parsed_message = json.loads(message_json)
-    else:
-        logger.info("Test message being used")
-        parsed_message = json.loads(message)
-        request_list = parsed_message['classifyRequests']
+    request_list = message_to_list(message)
 
-
-    # for request in message.classify_requests:
-    logger.info('Request list: {}'.format(request_list))
+    logger.debug('Request list: {}'.format(request_list))
     for request in request_list:
         logger.info('Request: {}'.format(request))
         record = {'bibcode': request['bibcode'],
@@ -110,11 +90,9 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
                   'output_path': output_path
                   }
 
-        # only needed for test protobuf - remove after updating protobuf
+        # Protobuf takes a list of records
         logger.info("creating output message")
-        out_message = parsed_message.copy()
-        out_message['classifyRequests'] = [record] # protobuf is for list of dictionaries
-        out_message = json.dumps(out_message)
+        out_message = list_to_message([record])
 
         logger.info('Output Record type: {}'.format(type(out_message)))
         logger.info('Output Record: {}'.format(out_message))
@@ -150,18 +128,12 @@ def task_send_input_record_to_classifier(message):
 
     logger.info("Fake data set for queue messages: {}".format(fake_data))
 
-
-    # Needed until protobuf updated
-    parsed_message = json.loads(message)
-
-    record = parsed_message['classifyRequests'][0]
-
-    logger.info("Parsed message")
-    logger.info(parsed_message)
+    record = message_to_list(message)[0]
 
     if fake_data is False:
         logger.info('Performing Inference')
-        categories, scores = classifier.batch_assign_SciX_categories([record['text']])
+        input_text = record['title'] + ' ' + record['abstract']
+        categories, scores = classifier.batch_assign_SciX_categories([input_text])
         record['categories'] = categories[0]
         record['scores'] = scores[0]
         logger.info('Categories: {}'.format(categories))
@@ -170,28 +142,16 @@ def task_send_input_record_to_classifier(message):
         logger.info('Skipping inference - generating fake data')
         record = utils.return_fake_data(record)
 
-    # Add model and classification information to record
-    record['model'] = config['CLASSIFICATION_PRETRAINED_MODEL'],
-    record['revision'] =  config['CLASSIFICATION_PRETRAINED_MODEL_REVISION'],
-    record['tokenizer'] = config['CLASSIFICATION_PRETRAINED_MODEL_TOKENIZER']
 
-    record['ADDITIONAL_EARTH_SCIENCE_PROCESSING'] = config['ADDITIONAL_EARTH_SCIENCE_PROCESSING']
-    record['ADDITIONAL_EARTH_SCIENCE_PROCESSING_THRESHOLD'] = config['ADDITIONAL_EARTH_SCIENCE_PROCESSING_THRESHOLD']
-    record['CLASSIFICATION_THRESHOLDS'] = config['CLASSIFICATION_THRESHOLDS']
-
-
-
-    logger.info('RECORD: {}'.format(record))
+    logger.debug('RECORD: {}'.format(record))
 
     # Decision making based on model scores
     record = app.classify_record_from_scores(record)
 
-    logger.info("Record after classification and thresholding: {}".format(record))
-    logger.info("Record Type: {}".format(type(record)))
+    logger.debug("Record after classification and thresholding: {}".format(record))
+    logger.debug("Record Type: {}".format(type(record)))
 
-    out_message = parsed_message.copy()
-    out_message['classifyRequests'] = [record]
-    out_message = json.dumps(out_message)
+    out_message = list_to_message([record])
 
     # Write the new classification to the database
     if delay_message:
@@ -221,19 +181,17 @@ def task_index_classified_record(message):
 
     delay_message = config.get('DELAY_MESSAGE', False) 
 
-    logger.info("Delay set for queue messages: {}".format(delay_message))
+    logger.debug("Delay set for queue messages: {}".format(delay_message))
 
-    logger.info("Unpacking message for indexing")
-    message = json.loads(message)
-    record = message['classifyRequests'][0]
-    logger.info(message)
-    logger.info('Record type: {}'.format(type(message)))
+    record = message_to_list(message)[0]
+    logger.delay(f"Message: {message}")
+    logger.delay(f'Record type: {type(message)}')
 
 
     record, success = app.index_record(record)
     if success is True:
         logger.info("Record indexed, outputting results")
-        task_output_results(record)
+        app.add_record_to_output_file(record)
     else:
         logger.info("Record failed to be indexed")
 
@@ -250,8 +208,9 @@ def task_update_validated_records(message):
         }
     """
 
+    record = message_to_list(message)[0]
     logger.info("Updating Validated Record")
-    app.update_validated_records(message)
+    app.update_validated_records(record)
 
 
 # @app.task(queue="output-results")
@@ -272,9 +231,11 @@ def task_output_results(message):
     :type: adsmsg.OrcidClaims
     :return: no return
     """
+
+    record = message_to_list(message)[0]
     logger.info('Output results ')
-    logger.info(message)
-    app.add_record_to_output_file(message)
+    logger.info(f'Record being output {message}')
+    app.add_record_to_output_file(record)
     logger.info(f'Message: {message}')
     # app.forward_message(output_message)
 

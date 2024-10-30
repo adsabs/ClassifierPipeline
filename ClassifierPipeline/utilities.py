@@ -3,6 +3,7 @@ import json
 import pickle
 import zlib
 import csv
+import re
 
 from google.protobuf.json_format import Parse, MessageToDict
 from adsmsg import ClassifyRequestRecordList, ClassifyResponseRecordList
@@ -196,6 +197,29 @@ def message_to_list(message):
     return output_list
 
 
+def check_identifier(identifier):
+    """
+    Determine form of identifier, bibcode or ScixID
+
+    Parameters
+    ----------
+    identifier - str : either a bibcode or SciX ID - eventually SciX ID will 
+    be primary identifier
+
+    Returns
+    ----------
+    string or None: either 'bibcode' or 'scix_id' or None if fails
+    """
+
+    identifier = str(identifier)
+
+    if len(identifier) != 19:
+        return None
+    scix_match_pattern = r'^scix:[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}$' 
+    if re.match(scix_match_pattern, identifier) is not None:
+        return 'scix'
+    else:
+        return 'bibcode'
 
 
 def extract_records_from_message(message):

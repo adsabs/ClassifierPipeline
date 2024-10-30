@@ -4,7 +4,8 @@ API_URL = "https://api.adsabs.harvard.edu/v1" # ADS API URL
 API_TOKEN = ''
 # CLASSIFICATION_PRETRAINED_MODEL = "adsabs/ASTROBERT"
 # CLASSIFICATION_PRETRAINED_MODEL = "ClassifierPipeline/tests/models/checkpoint-32100/"
-CLASSIFICATION_PRETRAINED_MODEL = "/app/ClassifierPipeline/tests/models/checkpoint-32100/"
+# CLASSIFICATION_PRETRAINED_MODEL = "/app/ClassifierPipeline/tests/models/checkpoint-32100/"
+CLASSIFICATION_PRETRAINED_MODEL = "adsabs/ASTROBERT"
 CLASSIFICATION_PRETRAINED_MODEL_REVISION = "SciX-Categorizer"
 CLASSIFICATION_PRETRAINED_MODEL_TOKENIZER = "adsabs/ASTROBERT"
 
@@ -32,7 +33,7 @@ TEST_INPUT_DATA = 'ClassifierPipeline/tests/stub_data/classifier_request.json'
 # TEST_INPUT_DATA = 'ClassifierPipeline/tests/stub_data/classifier_request_shorter.json'
 # TEST_INPUT_DATA = '/app/ClassifierPipeline/ClassifierPipeline/tests/stub_data/classifier_request_shorter.json'
 
-ALLOWED_CATEGORIES = set(['astronomy', 'planetary science', 'heliophysics', 'earth science', 'physics', 'other physics', 'other'])
+ALLOWED_CATEGORIES = set(['astronomy', 'planetary science', 'heliophysics', 'earth science', 'biophysics', 'other physics', 'other', 'garbage'])
 # Thresholds for model checkpoint 32100
 # [Astrophysics, Heliophysics, Planetary Science, Earth Science, Biophysics, Other Physics, Other, Garbage]
 # [0.06, 0.03, 0.04, 0.02, 0.0, 0.02, 0.02, 0.0]

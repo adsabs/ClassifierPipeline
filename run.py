@@ -60,12 +60,14 @@ def batch_new_records(records_path, batch_size=500):
 
     batch = []                                                     
 
+    possible_headers = ['bibcode','scixid','scix_id']
+
     with open(records_path, 'r') as file:
         reader = csv.reader(file)
         
         # Peek at the first row to determine if it's a header
         first_row = next(reader)
-        if str(first_row[0]).lower() == 'bibcode':
+        if str(first_row[0]).lower() in possible_headers:
             print("Header detected:", first_row)
         else:
             print("No header found, processing first row as data.")
