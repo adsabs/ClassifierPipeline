@@ -18,7 +18,7 @@ from adsputils import load_config, setup_logging
 # ads_cache = cachetools.TTLCache(maxsize=1024, ttl=3600, timer=time.time, missing=None, getsizeof=None)
 # bibcode_cache = cachetools.TTLCache(maxsize=2048, ttl=3600, timer=time.time, missing=None, getsizeof=None)
 
-ALLOWED_CATEGORIES = set(['astronomy', 'planetary science', 'heliophysics', 'earth science', 'physics', 'other physics', 'other'])
+# ALLOWED_CATEGORIES = set(['astronomy', 'planetary science', 'heliophysics', 'earth science', 'physics', 'other physics', 'other'])
 
 
 proj_home = os.path.realpath(os.path.join(os.path.dirname(__file__), "../"))
@@ -29,6 +29,7 @@ logger = setup_logging('app.py', proj_home=proj_home,
 
 logger.info('Config file {}'.format(config))
 
+ALLOWED_CATEGORIES = set(config['ALLOWED_CATEGORIES'])
 
 class SciXClassifierCelery(ADSCelery):
         
@@ -99,7 +100,7 @@ class SciXClassifierCelery(ADSCelery):
         Prepares an output file
         """
 
-        header = ['bibcode','title','abstract','run_id','categories','scores','collections','collection_scores','earth_science_adjustment','override']
+        header = ['bibcode','scix_id','title','abstract','run_id','categories','scores','collections','collection_scores','earth_science_adjustment','override']
 
         with open(output_path, 'w', newline='') as file:
             writer = csv.writer(file, delimiter='\t')
@@ -112,7 +113,7 @@ class SciXClassifierCelery(ADSCelery):
         """
         Adds a record to the output file
         """
-        row = [record['bibcode'], record['title'], record['abstract'],record['run_id'], ', '.join(record['categories']), ', '.join(map(str,record['scores'])), ', '.join(record['collections']), ', '.join(map(str, record['collection_scores'])), config['ADDITIONAL_EARTH_SCIENCE_PROCESSING'], '']
+        row = [record['bibcode'], record['scix_id'],record['title'], record['abstract'],record['run_id'], ', '.join(record['categories']), ', '.join(map(str,record['scores'])), ', '.join(record['collections']), ', '.join(map(str, record['collection_scores'])), config['ADDITIONAL_EARTH_SCIENCE_PROCESSING'], '']
 
         with open(record['output_path'], 'a', newline='') as file:
             writer = csv.writer(file, delimiter='\t')
@@ -185,7 +186,8 @@ class SciXClassifierCelery(ADSCelery):
                         session.commit()
 
                 # Override Table
-                check_overrides_query = session.query(models.OverrideTable).filter(models.OverrideTable.bibcode == record['bibcode']).order_by(models.OverrideTable.created.desc()).first()
+                check_overrides_query = session.query(models.OverrideTable).filter(or_(models.OverrideTable.scix_id == record['scix_id'], models.OverrideTable.bibcode == record['bibcode']])).order_by(models.OverrideTable.created.desc()).first()
+
 
                 if check_overrides_query is not None:
                     final_collections = check_overrides_query.override
@@ -200,13 +202,14 @@ class SciXClassifierCelery(ADSCelery):
                           'collections': record['collections']}
 
                 score_row = models.ScoreTable(bibcode=record['bibcode'], 
+                                            scix_id=record['scix_id'],
                                             scores=json.dumps(scores),
                                             overrides_id = overrides_id,
                                             run_id = record['run_id']
                                             ) 
 
                 # Check if EXACT record is already in the database
-                check_scores_query = session.query(models.ScoreTable).filter(and_(models.ScoreTable.bibcode == record['bibcode'], models.ScoreTable.scores == json.dumps(scores), models.ScoreTable.overrides_id == overrides_id, models.ScoreTable.run_id == record['run_id'])).order_by(models.ScoreTable.created.desc()).first()
+                check_scores_query = session.query(models.ScoreTable).filter(and_(or_(models.ScoreTable.scix_id == record['scix_id'], models.ScoreTable.bibcode == record['bibcode']), models.ScoreTable.scores == json.dumps(scores), models.ScoreTable.overrides_id == overrides_id, models.ScoreTable.run_id == record['run_id'])).order_by(models.ScoreTable.created.desc()).first()
 
 
                 if check_scores_query is None:
@@ -221,7 +224,7 @@ class SciXClassifierCelery(ADSCelery):
 
 
                 # Final Collection Table
-                check_final_collection_query = session.query(models.FinalCollectionTable).filter(models.FinalCollectionTable.bibcode == record['bibcode']).order_by(models.FinalCollectionTable.created.desc()).first()
+                check_final_collection_query = session.query(models.FinalCollectionTable).filter(or_(models.FinalCollectionTable.scix_id == record['scix_id'], models.FinalCollectionTable.bibcode == record['bibcode'])).order_by(models.FinalCollectionTable.created.desc()).first()
 
                 if check_final_collection_query is None:
                     session.add(final_collections_row)
@@ -236,10 +239,12 @@ class SciXClassifierCelery(ADSCelery):
                 logger.info('Updating validated record')
 
                 # Check for existing override
-                check_overrides_query = session.query(models.OverrideTable).filter(and_(models.OverrideTable.bibcode == record['bibcode'], models.OverrideTable.override == record['override'])).order_by(models.OverrideTable.created.desc()).first()
+                check_overrides_query = session.query(models.OverrideTable).filter(and_(or_(models.OverrideTable.scix_id == record['scix_id'], models.OverrideTable.bibcode == record['bibcode']), models.OverrideTable.override == record['override'])).order_by(models.OverrideTable.created.desc()).first()
 
                 if check_overrides_query is None:
-                    override_row = models.OverrideTable(bibcode=record['bibcode'], override=record['override'])
+                    override_row = models.OverrideTable(bibcode=record['bibcode'],
+                                                        scix_id=record['scix_id'],
+                                                        override=record['override'])
                     session.add(override_row)
                     session.commit()
                     overrides_id = override_row.id

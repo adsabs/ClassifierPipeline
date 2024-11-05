@@ -26,7 +26,7 @@ def prepare_output_file(output_path):
     """
     logger.info('Preparing output file - utilities.py')
 
-    header = ['bibcode','title','abstract','run_id','categories','scores','collections','collection_scores','earth_science_adjustment','override']
+    header = ['bibcode','scix_id','title','abstract','run_id','categories','scores','collections','collection_scores','earth_science_adjustment','override']
 
     with open(output_path, 'w', newline='') as file:
         writer = csv.writer(file, delimiter='\t')
@@ -217,47 +217,9 @@ def check_identifier(identifier):
         return None
     scix_match_pattern = r'^scix:[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}$' 
     if re.match(scix_match_pattern, identifier) is not None:
-        return 'scix'
+        return 'scix_id'
     else:
         return 'bibcode'
 
 
-def extract_records_from_message(message):
-    """
-    Extract records from a message. Use with json fake messages.
-
-    Parameters
-    ----------
-    message - protobuff defined serialized message
-
-    Returns
-    -------
-    record or list of records
-    """
-    parsed_message = json.loads(message)
-
-    record = parsed_message['classifyRequests'][0]
-
-    return record, parsed_message.copy()
-
-def package_records_to_message(record_list, out_message=None):
-    """
-    Package records in a message. Use with json fake messages.
-
-    Parameters
-    ----------
-    list of records - can be single element list
-
-    Returns
-    -------
-    message - protobuff defined serialized message
-    """
-    if not_out_message:
-        # handle here
-        pass
-  
-    out_message['classifyRequests'] = [record]
-    return json.dumps(out_message)
-
-    # if not delay_message:
 

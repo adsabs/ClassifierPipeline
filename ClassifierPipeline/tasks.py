@@ -44,6 +44,7 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
     :param message: contains the message inside the packet
         {
          'bibcode': String (19 chars),
+         'scix_id': String (19 chars),
          'title': String,
          'abstract':String
         }
@@ -80,6 +81,7 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
     for request in request_list:
         logger.info('Request: {}'.format(request))
         record = {'bibcode': request['bibcode'],
+                  'scix_id': request['scix_id'],
                   'title': request['title'],
                   'abstract': request['abstract'],
                   'text': request['title'] + ' ' + request['abstract'],
@@ -114,6 +116,7 @@ def task_send_input_record_to_classifier(message):
     :param message: contains the message inside the packet
         {
          'bibcode': String (19 chars),
+         'scix_id': String (19 chars),
          'title': String,
          'abstract':String
         }
@@ -171,6 +174,7 @@ def task_index_classified_record(message):
     :param message: contains the message inside the packet
         {
          'bibcode': String (19 chars),
+         'scix_id': String (19 chars),
          'collections': [String],
          'abstract':String,
          'operation_step': String,
@@ -226,6 +230,7 @@ def task_output_results(message):
     :param msg: contains the bibcode and the collections:
 
             {'bibcode': '....',
+             'scix_id': '....',
              'collections': [....]
             }
     :type: adsmsg.OrcidClaims

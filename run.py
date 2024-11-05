@@ -46,7 +46,10 @@ def row_to_dictionary(row):
     """
 
     record = {}
-    record['bibcode'] = row[0]
+    if utils.check_identifier(row[0]) == 'bibcode':
+        record['bibcode'] = row[0]
+    elif utils.check_identifier(row[0]) == 'scix_id':
+        record['scix_id'] = row[0]
     record['title'] = row[1]
     record['abstract'] = row[2]
 
@@ -148,7 +151,10 @@ def prepare_records(records_path, operation_step='validate'):
 
         for row in csv_reader:
             record = {}
-            record['bibcode'] = row[0]
+            if utils.check_identifier(row[0]) == 'bibcode':
+                record['bibcode'] = row[0]
+            elif utils.check_identifier(row[0]) == 'scix_id':
+                record['scix_id'] = row[0]
             record['title'] = row[1]
             record['abstract'] = row[2]
             record['text'] = row[1] + ' ' + row[2]
