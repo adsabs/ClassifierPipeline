@@ -95,7 +95,7 @@ class SciXClassifierCelery(ADSCelery):
         return record
 
 
-    def prepare_output_file(self, output_path):
+    def prepare_output_file(self, output_path, output_format=None):
         """
         Prepares an output file
         """
@@ -186,7 +186,7 @@ class SciXClassifierCelery(ADSCelery):
                         session.commit()
 
                 # Override Table
-                check_overrides_query = session.query(models.OverrideTable).filter(or_(models.OverrideTable.scix_id == record['scix_id'], models.OverrideTable.bibcode == record['bibcode']])).order_by(models.OverrideTable.created.desc()).first()
+                check_overrides_query = session.query(models.OverrideTable).filter(or_(models.OverrideTable.scix_id == record['scix_id'], models.OverrideTable.bibcode == record['bibcode'])).order_by(models.OverrideTable.created.desc()).first()
 
 
                 if check_overrides_query is not None:

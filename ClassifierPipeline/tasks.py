@@ -67,7 +67,7 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
     output_path = os.path.join(proj_home, 'logs', f'{run_id}_classified.tsv')
 
     logger.info('Preparing output file: {}'.format(output_path))
-    utils.prepare_output_file(output_path,output_format=output_format)
+    utils.prepare_output_file(output_path)
     logger.info('Output file prepared')
 
     # Delay setting
@@ -75,13 +75,19 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
 
     logger.debug("Delay set for queue messages: {}".format(delay_message))
 
-    request_list = message_to_list(message)
+    request_list = utils.message_to_list(message)
 
     logger.debug('Request list: {}'.format(request_list))
     for request in request_list:
         logger.info('Request: {}'.format(request))
-        record = {'bibcode': request['bibcode'],
-                  'scix_id': request['scix_id'],
+        record_bibcode = None
+        record_scix_id = None
+        if 'bibcode' in request:
+            record_bibcode = request['bibcode']
+        if 'scix_id' in request:
+            record_scix_id = request['scix_id']
+        record = {'bibcode': record_bibcode,
+                  'scix_id': record_scix_id,
                   'title': request['title'],
                   'abstract': request['abstract'],
                   'text': request['title'] + ' ' + request['abstract'],
@@ -94,7 +100,7 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
 
         # Protobuf takes a list of records
         logger.info("creating output message")
-        out_message = list_to_message([record])
+        out_message = utils.list_to_message([record])
 
         logger.info('Output Record type: {}'.format(type(out_message)))
         logger.info('Output Record: {}'.format(out_message))
@@ -131,7 +137,7 @@ def task_send_input_record_to_classifier(message):
 
     logger.info("Fake data set for queue messages: {}".format(fake_data))
 
-    record = message_to_list(message)[0]
+    record = utils.message_to_list(message)[0]
 
     if fake_data is False:
         logger.info('Performing Inference')
@@ -154,7 +160,7 @@ def task_send_input_record_to_classifier(message):
     logger.debug("Record after classification and thresholding: {}".format(record))
     logger.debug("Record Type: {}".format(type(record)))
 
-    out_message = list_to_message([record])
+    out_message = utils.list_to_message([record])
 
     # Write the new classification to the database
     if delay_message:
@@ -187,7 +193,7 @@ def task_index_classified_record(message):
 
     logger.debug("Delay set for queue messages: {}".format(delay_message))
 
-    record = message_to_list(message)[0]
+    record = utils.message_to_list(message)[0]
     logger.delay(f"Message: {message}")
     logger.delay(f'Record type: {type(message)}')
 
@@ -212,7 +218,7 @@ def task_update_validated_records(message):
         }
     """
 
-    record = message_to_list(message)[0]
+    record = utils.message_to_list(message)[0]
     logger.info("Updating Validated Record")
     app.update_validated_records(record)
 
@@ -237,10 +243,11 @@ def task_output_results(message):
     :return: no return
     """
 
-    record = message_to_list(message)[0]
+    record = utils.message_to_list(message)[0]
     logger.info('Output results ')
     logger.info(f'Record being output {message}')
     app.add_record_to_output_file(record)
+    logger.info(f'Record being sent back to Master Pipeline')
     logger.info(f'Message: {message}')
     # app.forward_message(output_message)
 
