@@ -2,18 +2,17 @@ SQLALCHEMY_URL = ''
 SQLALCHEMY_ECHO = False
 API_URL = "https://api.adsabs.harvard.edu/v1" # ADS API URL
 API_TOKEN = ''
-# CLASSIFICATION_PRETRAINED_MODEL = "adsabs/ASTROBERT"
-# CLASSIFICATION_PRETRAINED_MODEL = "ClassifierPipeline/tests/models/checkpoint-32100/"
-# CLASSIFICATION_PRETRAINED_MODEL = "/app/ClassifierPipeline/tests/models/checkpoint-32100/"
 CLASSIFICATION_PRETRAINED_MODEL = "adsabs/ASTROBERT"
 CLASSIFICATION_PRETRAINED_MODEL_REVISION = "SciX-Categorizer"
 CLASSIFICATION_PRETRAINED_MODEL_TOKENIZER = "adsabs/ASTROBERT"
 
 # Celery configuration
 CELERY_INCLUDE = ["classifierpipeline.tasks"]
-CELERY_BROKER = "pyamqp://test:test@localhost:5682/classifier_pipeline"
+# CELERY_BROKER = "pyamqp://test:test@localhost:5682/classifier_pipeline"
+CELERY_BROKER = ""
 
-OUTPUT_CELERY_BROKER = "pyamqp://test:test@localhost:5682/master_pipeline" 
+# OUTPUT_CELERY_BROKER = "pyamqp://test:test@localhost:5682/master_pipeline" 
+OUTPUT_CELERY_BROKER = ""
 OUTPUT_TASKNAME = "adsmp.tasks.task_update_record"
 # OUTPUT_TASKNAME = "ClassifierPipeline.tasks.task_handle_input_from_master"
 

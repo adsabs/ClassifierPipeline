@@ -1,22 +1,25 @@
-"""initialize database
+"""initialized classifier database
 
-Revision ID: 74a83030b18d
-Revises: 
-Create Date: 2024-02-23 11:24:57.637919
+Revision ID: 90672303d3f6
+Revises: None
+Create Date: 2024-11-21 09:26:21.363885
 
 """
+from alembic import op
+from sqlalchemy import Column, Integer, ARRAY, String, Text, Boolean, Numeric, BigInteger
+
 from typing import Sequence, Union
 
-from alembic import op
-import sqlalchemy as sa
-from sqlalchemy import Column, Integer, ARRAY, String, Text, Boolean, Numeric, BigInteger
 from adsputils import get_date, UTCDateTime
 
+
 # revision identifiers, used by Alembic.
-revision: str = '74a83030b18d'
+revision: str = '90672303d3f6'
+down_revision = None
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
+
 
 def upgrade() -> None:
 
@@ -24,7 +27,7 @@ def upgrade() -> None:
     op.create_table('overrides',
                     Column('id',Integer, primary_key=True),
                     Column('bibcode',String(19)),
-                    # Column('scixid',String(19)),
+                    Column('scix_id',String(19)),
                     Column('override', ARRAY(String)),
                     Column('created', UTCDateTime, default=get_date()),
                     )
@@ -57,7 +60,7 @@ def upgrade() -> None:
     op.create_table('scores',
                     Column('id', Integer, primary_key=True),
                     Column('bibcode',String(19)),
-                    # Column('scixid',String(19)),
+                    Column('scix_id',String(19)),
                     Column('scores', Text),
                     Column('run_id', Integer),
                     Column('overrides_id', BigInteger, nullable=True),
@@ -81,7 +84,7 @@ def upgrade() -> None:
     op.create_table('final_collection',
                     Column('id', Integer, primary_key=True),
                     Column('bibcode',String(19)),
-                    # Column('scixid',String(19)),
+                    Column('scix_id',String(19)),
                     Column('score_id', Integer),
                     Column('collection', ARRAY(String)),
                     Column('validated', Boolean, default=False),
@@ -96,10 +99,12 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_constraint('fk_overrides_id_scores', 'scores', type_='foreignkey')
-    op.drop_constraint('fk_models_id_scores', 'scores', type_='foreignkey')
+    # op.drop_constraint('fk_models_id_scores', 'scores', type_='foreignkey')
+    op.drop_constraint('fk_model_id_run', 'run', type_='foreignkey')
     op.drop_constraint('fk_score_id_final_collection', 'final_collection', type_='foreignkey')
     op.drop_table('scores')
     op.drop_table('overrides')
     op.drop_table('final_collection')
     op.drop_table('models')
+    op.drop_table('run')
 
