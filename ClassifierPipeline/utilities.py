@@ -5,8 +5,8 @@ import zlib
 import csv
 import re
 
-from google.protobuf.json_format import Parse, MessageToDict
-from adsmsg import ClassifyRequestRecordList, ClassifyResponseRecordList
+from google.protobuf.json_format import Parse, MessageToDict, ParseDict
+from adsmsg import ClassifyRequestRecord, ClassifyRequestRecordList, ClassifyResponseRecordList
 
 from adsputils import get_date, ADSCelery, u2asc
 from adsputils import load_config, setup_logging
@@ -18,6 +18,54 @@ config = load_config(proj_home=proj_home)
 logger = setup_logging('utilities.py', proj_home=proj_home,
                         level=config.get('LOGGING_LEVEL', 'INFO'),
                         attach_stdout=config.get('LOG_STDOUT', True))
+
+
+def classify_record_from_scores(record):
+    """
+    Classify a record after it has been scored. 
+
+    Parameters
+    ----------
+    record : dictionary (required) (default=None) Dictionary with the following
+        keys: bibcode, text, validate, categories, scores, and model information
+
+    Returns
+    -------
+    record : dictionary with the following keys: bibcode, text, validate, categories,
+        scores, model information, and Collections
+    """
+
+    logger.info('Classify Record From Scores')
+    logger.info('RECORD: {}'.format(record))
+    # Fetch thresholds from config file
+    thresholds = config['CLASSIFICATION_THRESHOLDS']
+    logger.info(f'Classification Thresholds: {thresholds}')
+
+
+    scores = record['scores']
+    categories = record['categories']
+
+    meet_threshold = [score > threshold for score, threshold in zip(scores, thresholds)]
+
+    # Extra step to check for "Earth Science" articles miscategorized as "Other"
+    # This is expected to be less neccessary with improved training data
+    if config['ADDITIONAL_EARTH_SCIENCE_PROCESSING'] == 'active':
+        logger.info('Additional Earth Science Processing')
+        if meet_threshold[categories.index('Other')] is True:
+            # If Earth Science score above additional threshold
+            if scores[categories.index('Earth Science')] \
+                    > config['ADDITIONAL_EARTH_SCIENCE_PROCESSING_THRESHOLD']:
+                meet_threshold[categories.index('Other')] = False
+                meet_threshold[categories.index('Earth Science')] = True
+
+    # Append collections to record
+    record['collections'] = [category for category, threshold in zip(categories, meet_threshold) if threshold is True]
+    record['collection_scores'] = [score for score, threshold in zip(scores, meet_threshold) if threshold is True]
+    record['collection_scores'] = [round(score, 2) for score in record['collection_scores']]
+
+
+    return record
+
 
 
 def prepare_output_file(output_path):
@@ -91,65 +139,59 @@ def return_fake_data(record):
 
     return record
 
-def list_to_message(input_list):
+def filter_allowed_fields(input_dict, allowed_fields=None):
+    """
+    Return a new dictionary containing only the keys from input_dict 
+    that appear in the allowed_fields set.
+    
+    :param input_dict: The original dictionary to filter.
+    :param allowed_fields: A set of field names that are allowed.
+    :return: A filtered dictionary with only allowed keys.
+    """
+    if allowed_fields is None:
+	# allowed_fields = {'bibcode', 'scixId', 'status', 'title', 'abstract', 
+	# 	   'operationStep', 'runid', 'override', 'outputPath', 
+	# 	   'scores', 'collections', 'collectionScores'}
+        allowed_fields = {'bibcode', 'scix_id', 'status', 'title', 'abstract', 
+                        'operation_step', 'run_id', 'override', 'output_path', 
+                        'scores', 'collections', 'collection_scores'}
+
+    return {key: value for key, value in input_dict.items() if key in allowed_fields}
+
+# Example usage:
+
+def dict_to_ClassifyRequestRecord(input_dict):
+    """
+    Convert a list of dictionaries to a protobuf message'
+    """
+    input_dict = filter_allowedFields(input_dict)
+
+    request_message = ClassifyRequestRecord()
+    message = ParseDict(input_dict, request_message)
+
+
+    # logger.info(f'Created ClassifyREquestRecord message from dictionary: {message}')
+    return message
+
+def list_to_ClassifyRequestRecordList(input_list):
     """
     Convert a list of dictionaries to a protobuf message'
     """
 
-    message = ClassifyRequestRecordList()
+    input_list = list(map(lambda d: filter_allowed_fields(d), input_list))
 
-    for item in input_list:
-        entry = message.classify_requests.add()
-        try:
-            entry.bibcode = item.get('bibcode')
-        except:
-            entry.bibcode = None
-        try:
-            entry.scix_id = item.get('scix_id')
-        except:
-            entry.scix_id = None
-        try:
-            entry.status = item.get('status')
-        except:
-            entry.status = None
-        try:
-            entry.title = item.get('title')
-        except:
-            entry.title = None
-        try:
-            entry.abstract = item.get('abstract')
-        except:
-            entry.abstract = None
-        try:
-            entry.operation_step = item.get('operation_step')
-        except:
-            entry.operation_step = None
-        try:
-            entry.run_id = item.get('run_id')
-        except:
-            entry.run_id = None
-        try:
-            entry.override = item.get('override')
-        except:
-            entry.override = None
-        try:
-            entry.output_path = item.get('output_path')
-        except:
-            entry.output_path = None
-        try:
-            entry.scores = item.get('scores')
-        except:
-            entry.scores = None
-        try:
-            entry.collections = item.get('collections')
-        except:
-            entry.collections = None
-        try:
-            entry.collection_scores = item.get('collection_scores')
-        except:
-            entry.collection_scores = None
+    request_list_dict = {
+            'classify_requests' : input_list,
+            # 'status' : 99
+            }
 
+    request_message = ClassifyRequestRecordList()
+    message = ParseDict(request_list_dict, request_message)
+
+
+    # logger.info(f'Created ClassifyREquestRecord message from dictionary: {message}')
     return message
+
 
 def list_to_output_message(input_list):
     """
@@ -166,10 +208,10 @@ def list_to_output_message(input_list):
             entry.bibcode = item.get('bibcode')
         except:
             entry.bibcode = None
-        try:
-            entry.scix_id = item.get('scix_id')
-        except:
-            entry.scix_id = None
+        # try:
+        #     entry.scix_id = item.get('scix_id')
+        # except:
+        #     entry.scix_id = None
         try:
             entry.status = item.get('status')
         except:
@@ -182,15 +224,16 @@ def list_to_output_message(input_list):
     return message
      
 
-def message_to_list(message):
+def classifyRequestRecordList_to_list(message):
     """
     Convert a protobuf ClassifyRequestRecordList to a list of dictionaries.
     """
 
+    # logger.info(f'Converting message to list: {message}')
     output_list = []
     request_list = message.classify_requests
     for request in request_list:
-        output_list.append(MessageToDict(request))
+        output_list.append(MessageToDict(request,preserving_proto_field_name=True))
 
     # import pdb;pdb.set_trace()
 

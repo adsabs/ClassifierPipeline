@@ -1,15 +1,18 @@
+# print('app - 00')
 import os
 import json
 import pickle
 import zlib
 import csv
 
+# print('app - 01')
 import ClassifierPipeline.models as models
 from adsputils import get_date, ADSCelery, u2asc
 from contextlib import contextmanager
-from sqlalchemy import create_engine, desc, and_
+from sqlalchemy import create_engine, desc, and_, or_
 from sqlalchemy.orm import scoped_session, sessionmaker
 from adsputils import load_config, setup_logging
+# print('app - 02')
 
 # global objects; we could make them belong to the app object but it doesn't seem necessary
 # unless two apps with a different endpint/config live along; TODO: move if necessary
@@ -27,10 +30,12 @@ logger = setup_logging('app.py', proj_home=proj_home,
                         level=config.get('LOGGING_LEVEL', 'INFO'),
                         attach_stdout=config.get('LOG_STDOUT', True))
 
-logger.info('Config file {}'.format(config))
+# logger.info('Config file {}'.format(config))
 
+# print('app - 03')
 ALLOWED_CATEGORIES = set(config['ALLOWED_CATEGORIES'])
 
+# print('app - 04')
 class SciXClassifierCelery(ADSCelery):
         
 
@@ -113,7 +118,7 @@ class SciXClassifierCelery(ADSCelery):
         """
         Adds a record to the output file
         """
-        row = [record['bibcode'], record['scix_id'],record['title'], record['abstract'],record['run_id'], ', '.join(record['categories']), ', '.join(map(str,record['scores'])), ', '.join(record['collections']), ', '.join(map(str, record['collection_scores'])), config['ADDITIONAL_EARTH_SCIENCE_PROCESSING'], '']
+        row = [record['bibcode'], record['scix_id'],record['title'], record['abstract'],record['run_id'], ', '.join(config['ALLOWED_CATEGORIES']), ', '.join(map(str,record['scores'])), ', '.join(record['collections']), ', '.join(map(str, record['collection_scores'])), config['ADDITIONAL_EARTH_SCIENCE_PROCESSING'], '']
 
         with open(record['output_path'], 'a', newline='') as file:
             writer = csv.writer(file, delimiter='\t')
@@ -127,6 +132,7 @@ class SciXClassifierCelery(ADSCelery):
         :param: none 
         :return: str Run table row ID
         """
+        logger.info('Indexing run')
         with self.session_scope() as session:
 
             run_row = models.RunTable()
@@ -146,7 +152,12 @@ class SciXClassifierCelery(ADSCelery):
                 to the database
         """
         logger.info('Indexing record')
+        logger.info(f'Record: {record}')
 
+        if 'operation_step' not in record:
+            record['operation_step'] = 'classify'
+        if 'scix_id' not in record:
+            record['scix_id'] = None
 
         with self.session_scope() as session:
 
@@ -155,9 +166,9 @@ class SciXClassifierCelery(ADSCelery):
                 logger.info('Indexing new record')
 
                 # Model Table
-                model = {'model' : config['Classification_Pretrained_Model'],
-                         'revision' : config['Classification_Pretrained_Model_Revision'],
-                         'tokenizer' : config['Classification_Pretrained_Model_Tokenizer']
+                model = {'model' : config['CLASSIFICATION_PRETRAINED_MODEL'],
+                         'revision' : config['CLASSIFICATION_PRETRAINED_MODEL_REVISION'],
+                         'tokenizer' : config['CLASSIFICATION_PRETRAINED_MODEL_TOKENIZER']
                          }
                 postprocessing = {'ADDITIONAL_EARTH_SCIENCE_PROCESSING' : config['ADDITIONAL_EARTH_SCIENCE_PROCESSING'],
                                   'ADDITIONAL_EARTH_SCIENCE_PROCESSING_THRESHOLD' : config['ADDITIONAL_EARTH_SCIENCE_PROCESSING_THRESHOLD'],
@@ -167,8 +178,10 @@ class SciXClassifierCelery(ADSCelery):
                                               postprocessing=json.dumps(postprocessing)
                                               )
 
+                logger.info('Checking model query')
                 check_model_query = session.query(models.ModelTable).filter(and_(models.ModelTable.model == json.dumps(model), models.ModelTable.postprocessing == json.dumps(postprocessing))).order_by(models.ModelTable.created.desc()).first()
 
+                logger.info(f'Check Model Query: {check_model_query}')
                 if check_model_query is None:
                     session.add(model_row)
                     session.commit()
@@ -179,6 +192,7 @@ class SciXClassifierCelery(ADSCelery):
                 # Run Table
                 check_run_query = session.query(models.RunTable).filter(models.RunTable.id == record['run_id']).order_by(models.RunTable.created.desc()).first()
 
+                logger.info(f'Check Run Query: {check_run_query}')
                 if check_run_query is not None:
 
                     if check_run_query.model_id != model_id:
@@ -189,6 +203,7 @@ class SciXClassifierCelery(ADSCelery):
                 check_overrides_query = session.query(models.OverrideTable).filter(or_(models.OverrideTable.scix_id == record['scix_id'], models.OverrideTable.bibcode == record['bibcode'])).order_by(models.OverrideTable.created.desc()).first()
 
 
+                logger.info(f'Check Overrides Query: {check_overrides_query}')
                 if check_overrides_query is not None:
                     final_collections = check_overrides_query.override
                     overrides_id = check_overrides_query.id
@@ -197,7 +212,8 @@ class SciXClassifierCelery(ADSCelery):
                     overrides_id = None
 
                 # Scores Table
-                scores = {'scores': {cat:score for cat, score in zip(record['categories'], record['scores'])},
+                scores_dict = {cat:score for cat, score in zip(config['ALLOWED_CATEGORIES'], record['scores'])}
+                scores = {'scores': scores_dict,
                           'earth_science_adjustment': config['ADDITIONAL_EARTH_SCIENCE_PROCESSING'],
                           'collections': record['collections']}
 
@@ -212,6 +228,7 @@ class SciXClassifierCelery(ADSCelery):
                 check_scores_query = session.query(models.ScoreTable).filter(and_(or_(models.ScoreTable.scix_id == record['scix_id'], models.ScoreTable.bibcode == record['bibcode']), models.ScoreTable.scores == json.dumps(scores), models.ScoreTable.overrides_id == overrides_id, models.ScoreTable.run_id == record['run_id'])).order_by(models.ScoreTable.created.desc()).first()
 
 
+                logger.info(f'Check Scores Query: {check_scores_query}')
                 if check_scores_query is None:
                     session.add(score_row)
                     session.commit()

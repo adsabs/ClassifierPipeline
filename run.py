@@ -11,19 +11,18 @@
 # __credit__ = ['T. Allen']
 # __license__ = 'MIT'
 
-print('Run.py')
 import os
 import csv
 import time
 import json
 import argparse
 import copy
-from ClassifierPipeline.tasks import task_update_record, task_update_validated_records
-from ClassifierPipeline import tasks
+from ClassifierPipeline.tasks import task_update_record, task_update_validated_records, task_index_classified_record
+# import ClassifierPipeline.tasks as tasks
 # from ClassifierPipeline.utilities import check_is_allowed_category
 import ClassifierPipeline.utilities as utils
 
-import classifyrecord_pb2
+# import classifyrecord_pb2
 from google.protobuf.json_format import Parse, MessageToDict
 from adsmsg import ClassifyRequestRecordList
 
@@ -37,6 +36,10 @@ logger = setup_logging('run.py', proj_home=proj_home,
                         level=config.get('LOGGING_LEVEL', 'INFO'),
                         attach_stdout=config.get('LOG_STDOUT', False))
 
+# test_message = ClassifyRequestRecordList()
+# entry = message_test.classify_requests.add()
+
+# import pdb;pdb.set_trace()
 
 # =============================== FUNCTIONS ======================================= #
 
@@ -167,11 +170,11 @@ def prepare_records(records_path, operation_step='validate'):
             allowed = utils.check_is_allowed_category(record['override'])
             if allowed:
                 record = record2_fake_protobuf(record)
-                tasks.task_index_classified_record(record)
+                task_index_classified_record(record)
 
             # Records that do not need an override
             # are marked as validated
-            tasks.task_update_validated_records(run_id)
+            task_update_validated_records(run_id)
 
 
 
@@ -182,6 +185,7 @@ def prepare_records(records_path, operation_step='validate'):
 
 if __name__ == '__main__':
 
+    print('Run.py - parsing input')
     parser = argparse.ArgumentParser(description='Process user input.')
 
     parser.add_argument('-n',
@@ -241,11 +245,36 @@ if __name__ == '__main__':
             message_json = f.read()
 
 
+        parsed_message = json.loads(message_json)
+        request_list = parsed_message['classifyRequests']
+        # Add some fields
+        print()
+        print('Requests')
+        for index, request in enumerate(request_list):
+            print()
+            # request.update({'operation_step' : 'classify'})
+            request['scix_id'] = f'scix:0000-0000-000{index}'
+            request['operation_step'] = 'classify'
+            request['override'] = ['Astronomy', 'Earth Science']
+            print(request)
+
+        print()
+        print('Input Dict')
+        print(request_list[0])
         logger.debug('Message for testing: {}'.format(message_json))
+        # message = utils.dict_to_ClassifyRequestRecord(request_list[0])
+        message = utils.list_to_ClassifyRequestRecordList(request_list)
+        print(message)
+        import pdb;pdb.set_trace()
+        test_list = utils.classifyRequestRecordList_to_list(message)
+        print('Test list - Return')
+        print(test_list[0])
+
+        import pdb;pdb.set_trace()
         if delay_message:
-            message = task_update_record.delay(message_json,pipeline='test')
+            message = task_update_record.delay(message)#,pipeline='test')
         else:
-            message = task_update_record(message_json,pipeline='test')
+            message = task_update_record(message,pipeline='test')
 
 
     logger.info("Done - run.py")

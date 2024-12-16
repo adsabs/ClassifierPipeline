@@ -26,7 +26,8 @@ revision = config.get('CLASSIFICATION_PRETRAINED_MODEL_REVISION',None)
 tokenizer_model_name_or_path = config.get('CLASSIFICATION_PRETRAINED_MODEL_TOKENIZER', None)
 
 # Load model and tokenizer
-labels = ['Astronomy', 'Heliophysics', 'Planetary Science', 'Earth Science', 'NASA-funded Biophysics', 'Other Physics', 'Other', 'Text Garbage']
+# labels = ['Astronomy', 'Heliophysics', 'Planetary Science', 'Earth Science', 'NASA-funded Biophysics', 'Other Physics', 'Other', 'Text Garbage']
+labels=config['ALLOWED_CATEGORIES']
 id2label = {i:c for i,c in enumerate(labels) }
 label2id = {v:k for k,v in id2label.items()}
 

@@ -1,14 +1,17 @@
+print('tasks - 00')
 import sys
 import os
 import json
 import adsputils
+print('tasks - 01')
 from adsputils import ADSCelery
 import ClassifierPipeline.app as app_module
+print('tasks - 02')
 import ClassifierPipeline.utilities as utils
 from ClassifierPipeline.classifier import Classifier
 from adsputils import load_config, setup_logging
 from kombu import Queue
-import classifyrecord_pb2
+# import classifyrecord_pb2
 from google.protobuf.json_format import Parse, MessageToDict
 
 from sqlalchemy.orm import scoped_session
@@ -58,6 +61,7 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
     """
 
     # Always pass a list of records, even just a list of one record
+    print('update record')
     logger.debug(f'Message type: {type(message)}')
     logger.debug(f'Message: {message}')
 
@@ -75,22 +79,32 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
 
     logger.debug("Delay set for queue messages: {}".format(delay_message))
 
-    request_list = utils.message_to_list(message)
+    request_list = utils.classifyRequestRecordList_to_list(message)
 
     logger.debug('Request list: {}'.format(request_list))
     for request in request_list:
         logger.info('Request: {}'.format(request))
         record_bibcode = None
         record_scix_id = None
+        # record_title = None
+        # record_abstract = None
         if 'bibcode' in request:
             record_bibcode = request['bibcode']
         if 'scix_id' in request:
             record_scix_id = request['scix_id']
+        if 'title' in request:
+            record_title = request['title']
+        else:
+            record_title = "None"
+        if 'abstract' in request:
+            record_abstract = request['abstract']
+        else:
+            record_abstract = "None"
         record = {'bibcode': record_bibcode,
                   'scix_id': record_scix_id,
-                  'title': request['title'],
-                  'abstract': request['abstract'],
-                  'text': request['title'] + ' ' + request['abstract'],
+                  'title': record_title,
+                  'abstract': record_abstract,
+                  'text': record_title + ' ' + record_abstract,
                   'operation_step': operation_step,
                   'run_id': run_id,
                   'output_format': output_format,
@@ -100,7 +114,9 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
 
         # Protobuf takes a list of records
         logger.info("creating output message")
-        out_message = utils.list_to_message([record])
+        logger.info(f"Record {record}")
+        # out_message = utils.list_to_message([record])
+        out_message = utils.list_to_ClassifyRequestRecordList([record])
 
         logger.info('Output Record type: {}'.format(type(out_message)))
         logger.info('Output Record: {}'.format(out_message))
@@ -137,7 +153,7 @@ def task_send_input_record_to_classifier(message):
 
     logger.info("Fake data set for queue messages: {}".format(fake_data))
 
-    record = utils.message_to_list(message)[0]
+    record = utils.classifyRequestRecordList_to_list(message)[0]
 
     if fake_data is False:
         logger.info('Performing Inference')
@@ -146,25 +162,29 @@ def task_send_input_record_to_classifier(message):
         record['categories'] = categories[0]
         record['scores'] = scores[0]
         logger.info('Categories: {}'.format(categories))
+        logger.info('Allowed Categories: {}'.format(config['ALLOWED_CATEGORIES']))
         logger.info('Scores: {}'.format(scores))
     else:
         logger.info('Skipping inference - generating fake data')
         record = utils.return_fake_data(record)
 
 
-    logger.debug('RECORD: {}'.format(record))
+    logger.info('RECORD: {}'.format(record))
 
     # Decision making based on model scores
-    record = app.classify_record_from_scores(record)
+    # record = app.classify_record_from_scores(record)
+    record = utils.classify_record_from_scores(record)
 
     logger.debug("Record after classification and thresholding: {}".format(record))
     logger.debug("Record Type: {}".format(type(record)))
 
-    out_message = utils.list_to_message([record])
+    # out_message = utils.list_to_message([record])
+    out_message = utils.list_to_ClassifyRequestRecordList([record])
 
     # Write the new classification to the database
     if delay_message:
         task_index_classified_record.delay(out_message)
+        # pass
     else:
         task_index_classified_record(out_message) 
 
@@ -193,9 +213,10 @@ def task_index_classified_record(message):
 
     logger.debug("Delay set for queue messages: {}".format(delay_message))
 
-    record = utils.message_to_list(message)[0]
-    logger.delay(f"Message: {message}")
-    logger.delay(f'Record type: {type(message)}')
+    # record = utils.message_to_list(message)[0]
+    record = utils.classifyRequestRecordList_to_list(message)[0]
+    logger.info(f"Message: {message}")
+    logger.info(f'Record type: {type(message)}')
 
 
     record, success = app.index_record(record)
