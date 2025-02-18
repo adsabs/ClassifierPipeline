@@ -2,39 +2,33 @@
 """
 """
 
-# __author__ = 'rca'
-# __maintainer__ = 'rca'
-# __copyright__ = 'Copyright 2015'
+# __author__ = 'tsa'
+# __maintainer__ = 'tsa'
+# __copyright__ = 'Copyright 2024'
 # __version__ = '1.0'
 # __email__ = 'ads@cfa.harvard.edu'
 # __status__ = 'Production'
-# __credit__ = ['J. Elliott']
+# __credit__ = ['T. Allen']
 # __license__ = 'MIT'
 
 import os
 import csv
-# import sys
-# import time
-# import json
+import time
+import json
 import argparse
-# import logging
-# import traceback
-# import warnings
-# from urllib3 import exceptions
-# warnings.simplefilter('ignore', exceptions.InsecurePlatformWarning)
+import copy
+from ClassifierPipeline.tasks import task_update_record, task_update_validated_records, task_index_classified_record
+# import ClassifierPipeline.tasks as tasks
+# from ClassifierPipeline.utilities import check_is_allowed_category
+import ClassifierPipeline.utilities as utils
 
-import pandas as pd
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
-
-# from adsputils import get_date
-# from adsmsg import OrcidClaims
-from ClassifierPipeline import classifier, tasks
-# from ADSOrcid import updater, tasks
-# from ADSOrcid.models import ClaimsLog, KeyValue, Records, AuthorInfo
+# import classifyrecord_pb2
+from google.protobuf.json_format import Parse, MessageToDict
+from adsmsg import ClassifyRequestRecordList
 
 # # ============================= INITIALIZATION ==================================== #
 
-from adsputils import setup_logging, load_config
+from adsputils import setup_logging, load_config, get_date
 proj_home = os.path.realpath(os.path.dirname(__file__))
 # global config
 config = load_config(proj_home=proj_home)
@@ -42,66 +36,103 @@ logger = setup_logging('run.py', proj_home=proj_home,
                         level=config.get('LOGGING_LEVEL', 'INFO'),
                         attach_stdout=config.get('LOG_STDOUT', False))
 
-# app = tasks.app
+# test_message = ClassifyRequestRecordList()
+# entry = message_test.classify_requests.add()
+
+# import pdb;pdb.set_trace()
 
 # =============================== FUNCTIONS ======================================= #
 
-def load_model_and_tokenizer(pretrained_model_name_or_path=None, revision=None, tokenizer_model_name_or_path=None):
+def row_to_dictionary(row):
     """
-    Load the model and tokenizer for the classification task, as well as the
-    label mappings. Returns the model, tokenizer, and label mappings as a
-    dictionary.
+    Convert row of input file to dictionary.
+    """
+
+    record = {}
+    if utils.check_identifier(row[0]) == 'bibcode':
+        record['bibcode'] = row[0]
+    elif utils.check_identifier(row[0]) == 'scix_id':
+        record['scix_id'] = row[0]
+    record['title'] = row[1]
+    record['abstract'] = row[2]
+
+    return record
+
+
+def batch_new_records(records_path, batch_size=500):
+    """
+    Batch contents of input file and pass to the input_records queue
+    """
+
+    batch = []                                                     
+
+    possible_headers = ['bibcode','scixid','scix_id']
+
+    with open(records_path, 'r') as file:
+        reader = csv.reader(file)
+        
+        # Peek at the first row to determine if it's a header
+        first_row = next(reader)
+        if str(first_row[0]).lower() in possible_headers:
+            print("Header detected:", first_row)
+        else:
+            print("No header found, processing first row as data.")
+            batch.append(row_to_dictionary(first_row))  # Add first row to the batch
+
+        for i, row in enumerate(reader, 1):
+            batch.append(row_to_dictionary(row))
+
+            if i % batch_size == 0:
+                print(f"Processing batch {i // batch_size}")
+                # message = utils.list_to_message(batch)
+                message = utils.list_to_ClassifyRequestRecordList(batch)
+                task_update_record.delay(message)
+                batch = []  # Clear the batch for the next one
+
+        if batch:
+            print("Processing final batch")
+            # message = utils.list_to_message(batch)
+            message = utils.list_to_ClassifyRequestRecordList(batch)
+            # new_batch = message_to_list(message)
+            # import pdb;pdb.set_trace()
+            task_update_record.delay(message)
+
+
+def records2_fake_protobuf(record):
+    """
+    Take an input dictionary and return a protobuf containing the dictionary
 
     Parameters
     ----------
-    pretrained_model_name_or_path : str (optional) (default=None) Specifies the
-        model name or path to the model to load. If None, then reads from the 
-        config file.
-    revision : str (optional) (default=None) Specifies the revision of the model
-    tokenizer_model_name_or_path : str (optional) (default=None) Specifies the
-        model name or path to the tokenizer to load. If None, then defaults to
-        the pretrained_model_name_or_path.
+    record : dict (required) dictionary with record information
+
+    Returns
+    -------
+    protobuf
     """
-    # Define labels and ID mappings
-    labels = ['Astronomy', 'Heliophysics', 'Planetary Science', 'Earth Science', 'NASA-funded Biophysics', 'Other Physics', 'Other', 'Text Garbage']
-    id2label = {i:c for i,c in enumerate(labels) }
-    label2id = {v:k for k,v in id2label.items()}
 
-    # Define model and tokenizer
-    if pretrained_model_name_or_path is None:
-        pretrained_model_name_or_path = config['CLASSIFICATION_PRETRAINED_MODEL']
-    if revision is None:
-        revision = config['CLASSIFICATION_PRETRAINED_MODEL_REVISION']
-    if tokenizer_model_name_or_path is None:
-        tokenizer_model_name_or_path = config['CLASSIFICATION_PRETRAINED_MODEL_TOKENIZER']
+    # message = classifyrecord_pb2.ClassifyRequestRecordList()
+    # message['classifyRequests'] = input_list
+    # message = json.dumps(message)
+    # import pdb;pdb.set_trace()
+    with open(config.get('TEST_INPUT_DATA'), 'r') as f:
+        message_json = f.read()
 
-    # Load tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(pretrained_model_name_or_path=tokenizer_model_name_or_path,
-                                              revision=revision,
-                                              do_lower_case=False)
+    parsed_message = json.loads(message_json)
+    request_list = parsed_message['classifyRequests']
 
-    # load model
-    model = AutoModelForSequenceClassification.from_pretrained(pretrained_model_name_or_path=pretrained_model_name_or_path,
-                                    revision=revision,
-                                    num_labels=len(labels),
-                                    problem_type='multi_label_classification',
-                                    id2label=id2label,
-                                    label2id=label2id
-                                        )
-    # Output as dictionary
-    model_dict = {'model': model,
-                  'tokenizer': tokenizer,
-                  'labels': labels,
-                  'id2label': id2label,
-                  'label2id': label2id}
+    out_message = parsed_message.copy()
+    out_message['classifyRequests'] = [record] # protobuf is for list of dictionaries
+    # import pdb;pdb.set_trace()
+    out_message = json.dumps(out_message)
 
-    return model_dict
+    return out_message
 
-def prepare_records(records_path):
+def prepare_records(records_path, operation_step='validate'):
     """
     Takes a path to a .csv file of records and converts each record into a
-    dictionary with the following keys: bibcode and text (a combination of 
-    title and abstract). Sends each record to the classification queue.
+    dictionary to be sent to the classification queu to be sent to the
+    classifier.
 
     Parameters
     ----------
@@ -111,126 +142,55 @@ def prepare_records(records_path):
     -------
     no return
     """
-    # Open .csv file and read in records
-    # Note: that this method requres the input file to have the following
-    # columns: bibcode, title, abstract
-    with open(records_path, 'r') as f: 
-        csv_reader = csv.reader(f)
+    print(f'Processing records from: {records_path}')
+    print()
+
+
+    # Get run_id from filename
+    run_id = records_path.split('/')[-1]
+    run_id = int(run_id.split('_')[0])
+
+    print(f'Processing run ID: {run_id}')
+
+    with open(records_path, 'r') as f:
+        csv_reader = csv.reader(f, delimiter='\t')
         headers = next(csv_reader)
 
         for row in csv_reader:
+            print(f'Processing row: {row}')
             record = {}
-            record['bibcode'] = row[0]
-            record['text'] = row[1] + ' ' + row[2]
+            if utils.check_identifier(row[0]) == 'bibcode':
+                record['bibcode'] = row[0]
+            elif utils.check_identifier(row[1]) == 'scix_id':
+                record['scix_id'] = row[1]
+            record['title'] = row[2]
+            record['abstract'] = row[3]
+            record['text'] = row[2] + ' ' + row[3]
+            record['operation_step'] = operation_step
+            record['run_id'] = run_id
 
-            print('testing message')
-            # Now send record to classification queue
-            # For Testing
-            tasks.task_send_input_record_to_classifier(record)
-            # For Production
-            # tasks.task_send_input_record_to_classifier.delay(record)
+            record['override'] = row[10].split(',')
+            run_id = row[4]
+            print(f'validating record: {record}')
+            logger.info(f'validating record: {record}')
+            # make a check of proper collections
+            allowed = utils.check_is_allowed_category(record['override'])
+            print(f'Are categories allowed: {allowed}')
+            if allowed:
+                # record = record2_fake_protobuf(record)
+                message = utils.list_to_ClassifyRequestRecordList([record])
+                task_index_classified_record(message)
 
+    # Records that do not need an override
+    # are marked as validated
 
-def score_record(record):
-    """
-    Provide classification scores for a record using the following
-        categories:
-            0 - Astronomy
-            1 - HelioPhysics
-            2 - Planetary Science
-            3 - Earth Science
-            4 - Biological and Physical Sciences
-            5 - Other Physics
-            6 - Other
-            7 - Garbage
+    run_id_record = {'run_id' : run_id}
+    print('Run ID RECORD')
+    print(run_id_record)
+    logger.info(f'Dictioanry for run id: {run_id_record}')
+    message = utils.list_to_ClassifyRequestRecordList([run_id_record])
+    task_update_validated_records(message)
 
-    Parameters
-    ----------
-    records_path : str (required) (default=None) Path to a .csv file of records
-
-    Returns
-    -------
-    records : dictionary with the following keys: bibcode, text,
-                categories, scores, and model information
-    """
-    # Load model and tokenizer
-    model_dict = load_model_and_tokenizer()
-
-    # Classify record
-    record['categories'], record['scores'] = classifier.batch_assign_SciX_categories(
-                                [record['text']],model_dict['tokenizer'],
-                                model_dict['model'],model_dict['labels'],
-                                model_dict['id2label'],model_dict['label2id'])
-
-    # Because the classifier returns a list of lists so it can batch process
-    # Take only the first element of each list
-    record['categories'] = record['categories'][0]
-    record['scores'] = record['scores'][0]
-
-    # Append model information to record
-    # record['model'] = model_dict['model']
-    record['model'] = model_dict
-
-
-    # print("Record: {}".format(record['bibcode']))
-    # print("Text: {}".format(record['text']))
-    # print("Categories: {}".format(record['categories']))
-    # print("Scores: {}".format(record['scores']))
-
-    return record
-
-def classify_record_from_scores(record):
-    """
-    Classify a record after it has been scored. 
-
-    Parameters
-    ----------
-    record : dictionary (required) (default=None) Dictionary with the following
-        keys: bibcode, text, categories, scores, and model information
-
-    Returns
-    -------
-    record : dictionary with the following keys: bibcode, text, categories,
-        scores, model information, and Collections
-    """
-
-    # Fetch thresholds from config file
-    thresholds = config['CLASSIFICATION_THRESHOLDS']
-    # print('Thresholds: {}'.format(thresholds))
-
-
-    scores = record['scores']
-    categories = record['categories']
-    # max_score_index = scores.index(max(scores))
-    # max_category = categories[max_score_index]
-    # max_score = scores[max_score_index]
-
-    meet_threshold = [score > threshold for score, threshold in zip(scores, thresholds)]
-
-    # Extra step to check for "Earth Science" articles miscategorized as "Other"
-    # This is expected to be less neccessary with improved training data
-    if config['ADDITIONAL_EARTH_SCIENCE_PROCESSING'] is True:
-        # print('Additional Earth Science Processing')
-        # import pdb;pdb.set_trace()
-        if meet_threshold[categories.index('Other')] is True:
-            # If Earth Science score above additional threshold
-            if scores[categories.index('Earth Science')] \
-                    > config['ADDITIONAL_EARTH_SCIENCE_PROCESSING_THRESHOLD']:
-                meet_threshold[categories.index('Other')] = False
-                meet_threshold[categories.index('Earth Science')] = True
-
-    # Append collections to record
-    record['collections'] = [category for category, threshold in zip(categories, meet_threshold) if threshold is True]
-    record['earth_science_adjustment'] = config['ADDITIONAL_EARTH_SCIENCE_PROCESSING']
-
-    return record
-
-
-def index_record():
-    """
-    Indexes a record
-    """
-    pass
 
 
 # =============================== MAIN ======================================= #
@@ -240,6 +200,7 @@ def index_record():
 
 if __name__ == '__main__':
 
+    print('Run.py - parsing input')
     parser = argparse.ArgumentParser(description='Process user input.')
 
     parser.add_argument('-n',
@@ -261,6 +222,13 @@ if __name__ == '__main__':
                         help='Path to comma delimited list of new records' +
                              'to process: columns: bibcode, title, abstract')
 
+    parser.add_argument('-t',
+                        '--test',
+                        dest='test',
+                        action='store_true',
+                        help='Run tests')
+
+
 
     args = parser.parse_args()
 
@@ -268,25 +236,60 @@ if __name__ == '__main__':
     if args.records:
         records_path = args.records
         print(records_path)
-        # Open .csv file and read in records
-        # Convert records to send to classifier
 
-    # import pdb;pdb.set_trace()
     if args.validate:
         print("Validating records")
+        prepare_records(records_path,operation_step='validate')
 
-    # import pdb;pdb.set_trace()
     if args.new_records:
         print("Processing new records")
-        prepare_records(records_path)
-        # records = score_records(records_path)
+        batch_new_records(records_path)
 
-        # for record in records:
-            # print("Record: {}".format(record['bibcode']))
-            # print("Text: {}".format(record['text']))
-            # print("Categories: {}".format(record['categories']))
-            # print("Scores: {}".format(record['scores']))
-        # records = classify_records_from_scores(records)
+    if args.test:
+        logger.debug("Running tests")
+        logger.debug("Dev Env")
 
-    print("Done")
-    import pdb;pdb.set_trace()
+        # Remove delay for testing
+        delay_message = config.get('DELAY_MESSAGE', True)
+
+        logger.debug("Delay set for queue messages: {}".format(delay_message))
+        logger.debug("Config: TEST_INPUT_DATA: {}".format(config.get('TEST_INPUT_DATA')))
+
+        # Read a protobuf from file
+        with open(config.get('TEST_INPUT_DATA'), 'r') as f:
+            message_json = f.read()
+
+
+        parsed_message = json.loads(message_json)
+        request_list = parsed_message['classifyRequests']
+        # Add some fields
+        print()
+        print('Requests')
+        for index, request in enumerate(request_list):
+            print()
+            # request.update({'operation_step' : 'classify'})
+            request['scix_id'] = f'scix:0000-0000-000{index}'
+            request['operation_step'] = 'classify'
+            request['override'] = ['Astronomy', 'Earth Science']
+            print(request)
+
+        print()
+        print('Input Dict')
+        print(request_list[0])
+        logger.debug('Message for testing: {}'.format(message_json))
+        # message = utils.dict_to_ClassifyRequestRecord(request_list[0])
+        message = utils.list_to_ClassifyRequestRecordList(request_list)
+        print(message)
+        import pdb;pdb.set_trace()
+        test_list = utils.classifyRequestRecordList_to_list(message)
+        print('Test list - Return')
+        print(test_list[0])
+
+        import pdb;pdb.set_trace()
+        if delay_message:
+            message = task_update_record.delay(message)#,pipeline='test')
+        else:
+            message = task_update_record(message,pipeline='test')
+
+
+    logger.info("Done - run.py")

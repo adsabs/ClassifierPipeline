@@ -1,4 +1,0 @@
-adsputils @ git+https://github.com/adsabs/ADSPipelineUtils.git@f94385421c062bdf2457ce50757b27e10a68f77a
-pandas==1.5.3
-torch==2.2.0
-transformers==4.37.2
