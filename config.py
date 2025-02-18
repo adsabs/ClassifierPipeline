@@ -4,6 +4,7 @@ API_URL = "https://api.adsabs.harvard.edu/v1" # ADS API URL
 API_TOKEN = ''
 CLASSIFICATION_PRETRAINED_MODEL = "adsabs/ASTROBERT"
 CLASSIFICATION_PRETRAINED_MODEL_REVISION = "SciX-Categorizer"
+# CLASSIFICATION_PRETRAINED_MODEL_REVISION = "/app/ClassifierPipeline/tests/models/checkpoint-32100/"
 CLASSIFICATION_PRETRAINED_MODEL_TOKENIZER = "adsabs/ASTROBERT"
 
 # Celery configuration

@@ -84,13 +84,15 @@ def batch_new_records(records_path, batch_size=500):
 
             if i % batch_size == 0:
                 print(f"Processing batch {i // batch_size}")
-                message = utils.list_to_message(batch)
+                # message = utils.list_to_message(batch)
+                message = utils.list_to_ClassifyRequestRecordList(batch)
                 task_update_record.delay(message)
                 batch = []  # Clear the batch for the next one
 
         if batch:
             print("Processing final batch")
-            message = utils.list_to_message(batch)
+            # message = utils.list_to_message(batch)
+            message = utils.list_to_ClassifyRequestRecordList(batch)
             # new_batch = message_to_list(message)
             # import pdb;pdb.set_trace()
             task_update_record.delay(message)
@@ -140,7 +142,7 @@ def prepare_records(records_path, operation_step='validate'):
     -------
     no return
     """
-    print('Processing records from: {}'.format(records_path))
+    print(f'Processing records from: {records_path}')
     print()
 
 
@@ -148,33 +150,46 @@ def prepare_records(records_path, operation_step='validate'):
     run_id = records_path.split('/')[-1]
     run_id = int(run_id.split('_')[0])
 
+    print(f'Processing run ID: {run_id}')
+
     with open(records_path, 'r') as f:
         csv_reader = csv.reader(f, delimiter='\t')
         headers = next(csv_reader)
 
         for row in csv_reader:
+            print(f'Processing row: {row}')
             record = {}
             if utils.check_identifier(row[0]) == 'bibcode':
                 record['bibcode'] = row[0]
-            elif utils.check_identifier(row[0]) == 'scix_id':
-                record['scix_id'] = row[0]
-            record['title'] = row[1]
-            record['abstract'] = row[2]
-            record['text'] = row[1] + ' ' + row[2]
+            elif utils.check_identifier(row[1]) == 'scix_id':
+                record['scix_id'] = row[1]
+            record['title'] = row[2]
+            record['abstract'] = row[3]
+            record['text'] = row[2] + ' ' + row[3]
             record['operation_step'] = operation_step
             record['run_id'] = run_id
 
-            record['override'] = row[9].split(',')
-            run_id = row[3]
+            record['override'] = row[10].split(',')
+            run_id = row[4]
+            print(f'validating record: {record}')
+            logger.info(f'validating record: {record}')
             # make a check of proper collections
             allowed = utils.check_is_allowed_category(record['override'])
+            print(f'Are categories allowed: {allowed}')
             if allowed:
-                record = record2_fake_protobuf(record)
-                task_index_classified_record(record)
+                # record = record2_fake_protobuf(record)
+                message = utils.list_to_ClassifyRequestRecordList([record])
+                task_index_classified_record(message)
 
-            # Records that do not need an override
-            # are marked as validated
-            task_update_validated_records(run_id)
+    # Records that do not need an override
+    # are marked as validated
+
+    run_id_record = {'run_id' : run_id}
+    print('Run ID RECORD')
+    print(run_id_record)
+    logger.info(f'Dictioanry for run id: {run_id_record}')
+    message = utils.list_to_ClassifyRequestRecordList([run_id_record])
+    task_update_validated_records(message)
 
 
 

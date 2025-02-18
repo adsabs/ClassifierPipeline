@@ -13,6 +13,7 @@ from adsputils import load_config, setup_logging
 from kombu import Queue
 # import classifyrecord_pb2
 from google.protobuf.json_format import Parse, MessageToDict
+from adsmsg import ClassifyRequestRecord, ClassifyRequestRecordList, ClassifyResponseRecord, ClassifyResponseRecordList
 
 from sqlalchemy.orm import scoped_session
 from sqlalchemy.orm import sessionmaker
@@ -63,7 +64,7 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
     # Always pass a list of records, even just a list of one record
     print('update record')
     logger.debug(f'Message type: {type(message)}')
-    logger.debug(f'Message: {message}')
+    logger.info(f'Message: {message}')
 
     run_id = app.index_run()
     logger.info('Run ID: {}'.format(run_id))
@@ -215,17 +216,44 @@ def task_index_classified_record(message):
 
     # record = utils.message_to_list(message)[0]
     record = utils.classifyRequestRecordList_to_list(message)[0]
-    logger.info(f"Message: {message}")
+    logger.info(f"Record: {record}")
     logger.info(f'Record type: {type(message)}')
 
 
     record, success = app.index_record(record)
-    if success is True:
+    if success == "record_indexed":
         logger.info("Record indexed, outputting results")
         app.add_record_to_output_file(record)
+    elif success == "record_validated":
+        # message = utils.dict_to_ClassifyResponseRecord(record)
+        # message = utils.dict_to_ClassifyResponseRecord([record])
+        # message = utils.list_to_ClassifyResponseRecordList([record])
+        task_message_to_master(record)
+        # logger.info(f"Sent record to master: {record}")
     else:
         logger.info("Record failed to be indexed")
 
+@app.task(queue="update-record")
+def task_message_to_master(message):
+    """
+    Return classified record to Master Pipeline.
+    
+    :param message: contains the message inside the packet
+        {
+         'bibcode': String (19 chars),
+         'scix_id': String (19 chars),
+         'collections': [String],
+         'status': int
+        }
+    :return: no return
+    """
+    if isinstance(message, dict):
+        out_message = utils.list_to_ClassifyResponseRecordList([message])
+    if isinstance(message, list):
+        out_message = utils.list_to_ClassifyResponseRecordList(message)
+    logger.info(f"Forwarding message to Master - Message: {out_message}")
+    # app.forward_message(out_message, pipeline='master')
+    app.forward_message(out_message)
 
 # @app.task(queue="classify-record")
 # @app.task(queue="update-record")
@@ -239,9 +267,15 @@ def task_update_validated_records(message):
         }
     """
 
-    record = utils.message_to_list(message)[0]
-    logger.info("Updating Validated Record")
-    app.update_validated_records(record)
+    logger.info(f"Updating Validated Record from message: {message}")
+    record = utils.classifyRequestRecordList_to_list(message)[0]
+    record_list, success_list = app.update_validated_records(record['run_id'])
+    for record, success in zip(record_list, success_list):
+        if success == "success":
+            task_message_to_master(record)
+            # out_message = utils.list_to_ClassifyResponseRecordList(message)
+            # logger.info(f"Forwarding message to Master - Message: {out_message}")
+        # app.forward_message(out_message, pipeline='master')
 
 
 # @app.task(queue="output-results")

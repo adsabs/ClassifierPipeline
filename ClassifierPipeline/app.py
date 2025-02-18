@@ -55,50 +55,6 @@ class SciXClassifierCelery(ADSCelery):
         request_list = parsed_message['classifyRequests']
 
 
-    def classify_record_from_scores(self, record):
-        """
-        Classify a record after it has been scored. 
-
-        Parameters
-        ----------
-        record : dictionary (required) (default=None) Dictionary with the following
-            keys: bibcode, text, validate, categories, scores, and model information
-
-        Returns
-        -------
-        record : dictionary with the following keys: bibcode, text, validate, categories,
-            scores, model information, and Collections
-        """
-
-        # Fetch thresholds from config file
-        thresholds = config['CLASSIFICATION_THRESHOLDS']
-        logger.info(f'Classification Thresholds: {thresholds}')
-
-
-        scores = record['scores']
-        categories = record['categories']
-
-        meet_threshold = [score > threshold for score, threshold in zip(scores, thresholds)]
-
-        # Extra step to check for "Earth Science" articles miscategorized as "Other"
-        # This is expected to be less neccessary with improved training data
-        if config['ADDITIONAL_EARTH_SCIENCE_PROCESSING'] == 'active':
-            logger.info('Additional Earth Science Processing')
-            if meet_threshold[categories.index('Other')] is True:
-                # If Earth Science score above additional threshold
-                if scores[categories.index('Earth Science')] \
-                        > config['ADDITIONAL_EARTH_SCIENCE_PROCESSING_THRESHOLD']:
-                    meet_threshold[categories.index('Other')] = False
-                    meet_threshold[categories.index('Earth Science')] = True
-
-        # Append collections to record
-        record['collections'] = [category for category, threshold in zip(categories, meet_threshold) if threshold is True]
-        record['collection_scores'] = [score for score, threshold in zip(scores, meet_threshold) if threshold is True]
-        record['collection_scores'] = [round(score, 2) for score in record['collection_scores']]
-
-
-        return record
-
 
     def prepare_output_file(self, output_path, output_format=None):
         """
@@ -120,6 +76,7 @@ class SciXClassifierCelery(ADSCelery):
         """
         row = [record['bibcode'], record['scix_id'],record['title'], record['abstract'],record['run_id'], ', '.join(config['ALLOWED_CATEGORIES']), ', '.join(map(str,record['scores'])), ', '.join(record['collections']), ', '.join(map(str, record['collection_scores'])), config['ADDITIONAL_EARTH_SCIENCE_PROCESSING'], '']
 
+        logger.info(f'Writing {row}')
         with open(record['output_path'], 'a', newline='') as file:
             writer = csv.writer(file, delimiter='\t')
             writer.writerow(row)
@@ -156,6 +113,8 @@ class SciXClassifierCelery(ADSCelery):
 
         if 'operation_step' not in record:
             record['operation_step'] = 'classify'
+        if 'bibcode' not in record:
+            record['bibcode'] = None
         if 'scix_id' not in record:
             record['scix_id'] = None
 
@@ -200,7 +159,7 @@ class SciXClassifierCelery(ADSCelery):
                         session.commit()
 
                 # Override Table
-                check_overrides_query = session.query(models.OverrideTable).filter(or_(models.OverrideTable.scix_id == record['scix_id'], models.OverrideTable.bibcode == record['bibcode'])).order_by(models.OverrideTable.created.desc()).first()
+                check_overrides_query = session.query(models.OverrideTable).filter(or_(and_(models.OverrideTable.scix_id == record['scix_id'], models.OverrideTable.scix_id != None), and_(models.OverrideTable.bibcode == record['bibcode'], models.OverrideTable.bibcode != None))).order_by(models.OverrideTable.created.desc()).first()
 
 
                 logger.info(f'Check Overrides Query: {check_overrides_query}')
@@ -225,7 +184,7 @@ class SciXClassifierCelery(ADSCelery):
                                             ) 
 
                 # Check if EXACT record is already in the database
-                check_scores_query = session.query(models.ScoreTable).filter(and_(or_(models.ScoreTable.scix_id == record['scix_id'], models.ScoreTable.bibcode == record['bibcode']), models.ScoreTable.scores == json.dumps(scores), models.ScoreTable.overrides_id == overrides_id, models.ScoreTable.run_id == record['run_id'])).order_by(models.ScoreTable.created.desc()).first()
+                check_scores_query = session.query(models.ScoreTable).filter(and_(or_(and_(models.ScoreTable.scix_id == record['scix_id'], models.ScoreTable.scix_id != None), and_(models.ScoreTable.bibcode == record['bibcode'], models.ScoreTable.bibcode != None)), models.ScoreTable.scores == json.dumps(scores), models.ScoreTable.overrides_id == overrides_id, models.ScoreTable.run_id == record['run_id'])).order_by(models.ScoreTable.created.desc()).first()
 
 
                 logger.info(f'Check Scores Query: {check_scores_query}')
@@ -241,8 +200,9 @@ class SciXClassifierCelery(ADSCelery):
 
 
                 # Final Collection Table
-                check_final_collection_query = session.query(models.FinalCollectionTable).filter(or_(models.FinalCollectionTable.scix_id == record['scix_id'], models.FinalCollectionTable.bibcode == record['bibcode'])).order_by(models.FinalCollectionTable.created.desc()).first()
+                check_final_collection_query = session.query(models.FinalCollectionTable).filter(or_(and_(models.FinalCollectionTable.scix_id == record['scix_id'], models.FinalCollectionTable.scix_id != None), and_(models.FinalCollectionTable.bibcode == record['bibcode'], models.FinalCollectionTable.bibcode != None))).order_by(models.FinalCollectionTable.created.desc()).first()
 
+                logger.info(f'Check Final Collections Query: {check_final_collection_query}')
                 if check_final_collection_query is None:
                     session.add(final_collections_row)
                     session.commit()
@@ -250,14 +210,16 @@ class SciXClassifierCelery(ADSCelery):
                     check_final_collection_query.final_collection = final_collections
                     session.commit()
 
-                return record, True
+                # session.close()
+                return record, "record_indexed"
                 
             else:
                 logger.info('Updating validated record')
 
                 # Check for existing override
-                check_overrides_query = session.query(models.OverrideTable).filter(and_(or_(models.OverrideTable.scix_id == record['scix_id'], models.OverrideTable.bibcode == record['bibcode']), models.OverrideTable.override == record['override'])).order_by(models.OverrideTable.created.desc()).first()
+                check_overrides_query = session.query(models.OverrideTable).filter(and_(or_(and_(models.OverrideTable.scix_id == record['scix_id'], models.OverrideTable.scix_id != None), and_(models.OverrideTable.bibcode == record['bibcode'], models.OverrideTable.bibcode != None))), models.OverrideTable.override == record['override']).order_by(models.OverrideTable.created.desc()).first()
 
+                logger.info(f'Check overrides query: {check_overrides_query}')
                 if check_overrides_query is None:
                     override_row = models.OverrideTable(bibcode=record['bibcode'],
                                                         scix_id=record['scix_id'],
@@ -266,18 +228,23 @@ class SciXClassifierCelery(ADSCelery):
                     session.commit()
                     overrides_id = override_row.id
 
-                    update_scores_query = session.query(models.ScoreTable).filter(models.ScoreTable.bibcode == record['bibcode']).order_by(models.ScoreTable.created.desc()).all()
+                    # update_scores_query = session.query(models.ScoreTable).filter(models.ScoreTable.bibcode == record['bibcode']).order_by(models.ScoreTable.created.desc()).all()
+                    update_scores_query = session.query(models.ScoreTable).filter(or_(and_(models.ScoreTable.scix_id == record['scix_id'], models.ScoreTable.scix_id != None), and_(models.ScoreTable.bibcode == record['bibcode'], models.ScoreTable.bibcode != None))).order_by(models.ScoreTable.created.desc()).all()
+                    logger.info(f'update_scores_query: {update_scores_query}')
                     for element in update_scores_query:
                         element.overrides_id = overrides_id
                         session.commit()
 
-                    update_final_collection_query = session.query(models.FinalCollectionTable).filter(models.FinalCollectionTable.bibcode == record['bibcode']).order_by(models.FinalCollectionTable.created.desc()).first()
+                    # update_final_collection_query = session.query(models.FinalCollectionTable).filter(models.FinalCollectionTable.bibcode == record['bibcode']).order_by(models.FinalCollectionTable.created.desc()).first()
+                    update_final_collection_query = session.query(models.FinalCollectionTable).filter(or_(and_(models.FinalCollectionTable.scix_id == record['scix_id'], models.FinalCollectionTable.scix_id != None), and_(models.FinalCollectionTable.bibcode == record['bibcode'], models.FinalCollectionTable.bibcode != None))).order_by(models.FinalCollectionTable.created.desc()).first()
 
+                    logger.info(f'update_final_collection_query: {update_final_collection_query}')
+                    logger.info(f'update_final_collection_query with override: {record["override"]}')
                     update_final_collection_query.collection = record['override']
                     update_final_collection_query.validated = True
                     session.commit()
 
-                return record, False
+                return record, "record_validated"
 
 
     # def update_validated_records(self, run_name):
@@ -298,14 +265,27 @@ class SciXClassifierCelery(ADSCelery):
 
                 run_id_query = session.query(models.ScoreTable).filter(models.ScoreTable.run_id == run_query.id).all()
 
+                record_list = []
+                success_list = []
                 for record in run_id_query:
 
-                    update_final_collection_query = session.query(models.FinalCollectionTable).filter(and_(models.FinalCollectionTable.bibcode == record.bibcode, models.FinalCollectionTable.validated == False)).order_by(models.FinalCollectionTable.created.desc()).first()
+                    final_collection_query = session.query(models.FinalCollectionTable).filter(or_(and_(models.FinalCollectionTable.scix_id == record.scix_id, models.FinalCollectionTable.scix_id != None), and_(models.FinalCollectionTable.bibcode == record.bibcode, models.FinalCollectionTable.bibcode != None))).order_by(models.FinalCollectionTable.created.desc()).first()
+
+                    out_record = {'bibcode' : record.bibcode,
+                                  'scix_id' : record.scix_id,
+                                  'collections' : final_collection_query.collection}
+                    record_list.append(out_record)
+
+                    logger.info(f'Record to update as validated: {record}')
+                    update_final_collection_query = session.query(models.FinalCollectionTable).filter(and_(or_(and_(models.FinalCollectionTable.scix_id == record.scix_id, models.FinalCollectionTable.scix_id != None), and_(models.FinalCollectionTable.bibcode == record.bibcode, models.FinalCollectionTable.bibcode != None))), models.FinalCollectionTable.validated == False).order_by(models.FinalCollectionTable.created.desc()).first()
+                    # update_final_collection_query = session.query(models.FinalCollectionTable).filter(and_(or_(models.FinalCollectionTable.scix_id == record.scix_id, models.FinalCollectionTable.bibcode == record.bibcode), models.FinalCollectionTable.validated == False)).order_by(models.FinalCollectionTable.created.desc()).first()
 
                     if update_final_collection_query is not None:
                         update_final_collection_query.validated = True
                         session.commit()
+                        success_list.append("success")
 
+                return record_list, success_list
  
 
 

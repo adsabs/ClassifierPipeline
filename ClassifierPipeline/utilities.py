@@ -6,7 +6,7 @@ import csv
 import re
 
 from google.protobuf.json_format import Parse, MessageToDict, ParseDict
-from adsmsg import ClassifyRequestRecord, ClassifyRequestRecordList, ClassifyResponseRecordList
+from adsmsg import ClassifyRequestRecord, ClassifyRequestRecordList, ClassifyResponseRecord, ClassifyResponseRecordList
 
 from adsputils import get_date, ADSCelery, u2asc
 from adsputils import load_config, setup_logging
@@ -94,12 +94,15 @@ def check_is_allowed_category(categories_list):
     ----------
     True if all categories in approved
     """
+    logger.info(f"Cheking allowed categories for {categories_list}")
     allowed = config.get('ALLOWED_CATEGORIES')
+    allowed = [s.lower() for s in allowed]
 
     categories_list = [s.lower() for s in categories_list]
 
     result = [element in allowed for element in categories_list]
 
+    logger.info(f"Cheking allowed categories for (after lowercase) {categories_list}")
     # Only return True if all True
     if sum(result) == len(result):
         return True
@@ -139,22 +142,26 @@ def return_fake_data(record):
 
     return record
 
-def filter_allowed_fields(input_dict, allowed_fields=None):
+def filter_allowed_fields(input_dict, allowed_fields=None,response=False):
     """
     Return a new dictionary containing only the keys from input_dict 
-    that appear in the allowed_fields set.
+    that are part of the ClassifyRequestRecord protobuf definition.
     
     :param input_dict: The original dictionary to filter.
     :param allowed_fields: A set of field names that are allowed.
+    :param output: Boolean (False): True if ClassifyResponseRecord is desired output
     :return: A filtered dictionary with only allowed keys.
     """
     if allowed_fields is None:
 	# allowed_fields = {'bibcode', 'scixId', 'status', 'title', 'abstract', 
-	# 	   'operationStep', 'runid', 'override', 'outputPath', 
-	# 	   'scores', 'collections', 'collectionScores'}
-        allowed_fields = {'bibcode', 'scix_id', 'status', 'title', 'abstract', 
-                        'operation_step', 'run_id', 'override', 'output_path', 
-                        'scores', 'collections', 'collection_scores'}
+	#	   'operationStep', 'runid', 'override', 'outputPath', 
+	#	   'scores', 'collections', 'collectionScores'}
+        if response is False:
+            allowed_fields = {'bibcode', 'scix_id', 'status', 'title', 'abstract', 
+                            'operation_step', 'run_id', 'override', 'output_path', 
+                            'scores', 'collections', 'collection_scores'}
+        else:
+            allowed_fields = {'bibcode', 'scix_id', 'status', 'collections'}
 
     return {key: value for key, value in input_dict.items() if key in allowed_fields}
 
@@ -162,9 +169,9 @@ def filter_allowed_fields(input_dict, allowed_fields=None):
 
 def dict_to_ClassifyRequestRecord(input_dict):
     """
-    Convert a list of dictionaries to a protobuf message'
+    Convert a dictionary to a protobuf message'
     """
-    input_dict = filter_allowedFields(input_dict)
+    input_dict = filter_allowed_fields(input_dict)
 
     request_message = ClassifyRequestRecord()
     message = ParseDict(input_dict, request_message)
@@ -180,6 +187,8 @@ def list_to_ClassifyRequestRecordList(input_list):
 
     input_list = list(map(lambda d: filter_allowed_fields(d), input_list))
 
+    logger.info(f'Created ClassifyResponseRecord message from list: {input_list}')
+
     request_list_dict = {
             'classify_requests' : input_list,
             # 'status' : 99
@@ -189,7 +198,42 @@ def list_to_ClassifyRequestRecordList(input_list):
     message = ParseDict(request_list_dict, request_message)
 
 
+    # logger.info(f'Created ClassifyResponseRecord message from dictionary: {message}')
+    return message
+
+
+def dict_to_ClassifyResponseRecord(input_dict):
+    """
+    Convert a list of dictionaries to a protobuf message'
+    """
+    input_dict = filter_allowed_fields(input_dict, response=True)
+
+    request_message = ClassifyResponseRecord()
+    message = ParseDict(input_dict, request_message)
+
+
     # logger.info(f'Created ClassifyREquestRecord message from dictionary: {message}')
+    return message
+
+def list_to_ClassifyResponseRecordList(input_list):
+    """
+    Convert a list of dictionaries to a protobuf message'
+    """
+
+    input_list = list(map(lambda d: filter_allowed_fields(d, response=True), input_list))
+
+    response_list_dict = {
+            # 'classify_responses' : input_list,
+            'classifyResponses' : input_list,
+            # 'status' : 99
+            }
+
+    logger.info(f"Dictionary for Response Message {response_list_dict}")
+    response_message = ClassifyResponseRecordList()
+    message = ParseDict(response_list_dict, response_message)
+
+
+    # logger.info(f'Created ClassifyResponseRecord message from dictionary: {message}')
     return message
 
 
@@ -229,13 +273,15 @@ def classifyRequestRecordList_to_list(message):
     Convert a protobuf ClassifyRequestRecordList to a list of dictionaries.
     """
 
-    # logger.info(f'Converting message to list: {message}')
+    logger.info(f'Converting message to list: {message}')
     output_list = []
     request_list = message.classify_requests
     for request in request_list:
+        logger.info(f'Unpacking request: {request}')
         output_list.append(MessageToDict(request,preserving_proto_field_name=True))
 
     # import pdb;pdb.set_trace()
+    logger.info(f'Output list from message: {output_list}')
 
     return output_list
 

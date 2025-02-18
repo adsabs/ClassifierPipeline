@@ -20,8 +20,8 @@ logger = setup_logging('astrobert_classification.py', proj_home=proj_home,
                         attach_stdout=config.get('LOG_STDOUT', True))
 
 # Define model paths
-# pretrained_model_name_or_path = config.get('CLASSIFICATION_PRETRAINED_MODEL', None)
-pretrained_model_name_or_path = "/app/ClassifierPipeline/tests/models/checkpoint-32100/"
+pretrained_model_name_or_path = config.get('CLASSIFICATION_PRETRAINED_MODEL', None)
+# pretrained_model_name_or_path = "/app/ClassifierPipeline/tests/models/checkpoint-32100/"
 revision = config.get('CLASSIFICATION_PRETRAINED_MODEL_REVISION',None)
 tokenizer_model_name_or_path = config.get('CLASSIFICATION_PRETRAINED_MODEL_TOKENIZER', None)
 
