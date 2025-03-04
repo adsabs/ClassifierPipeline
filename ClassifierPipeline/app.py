@@ -246,13 +246,63 @@ class SciXClassifierCelery(ADSCelery):
 
                 return record, "record_validated"
 
+    def query_final_collection_table(self, run_id=None, bibcode=None, scix_id=None):
+        """
+        Query final collections table based on run_id, bibcode, or scix_id
+        
+        param: run_id - integer
+               bibcode - string
+               scix)id - string
+
+        return: list of record dictionaries containing bibcode,
+                scix_id, run_id and collections
+        """
+
+        with self.session_scope() as session:
+
+
+            record_list = []
+            if run_id is not None:
+
+                run_query = session.query(models.RunTable).filter(models.RunTable.id == run_id).first()
+                run_id_query = session.query(models.ScoreTable).filter(models.ScoreTable.run_id == run_query.id).all()
+
+                for record in run_id_query:
+
+                    final_collection_query = session.query(models.FinalCollectionTable).filter(or_(and_(models.FinalCollectionTable.scix_id == record.scix_id, models.FinalCollectionTable.scix_id != None), and_(models.FinalCollectionTable.bibcode == record.bibcode, models.FinalCollectionTable.bibcode != None))).order_by(models.FinalCollectionTable.created.desc()).first()
+
+                    out_record = {'bibcode' : record.bibcode,
+                                  'scix_id' : record.scix_id,
+                                  'collections' : final_collection_query.collection}
+                    record_list.append(out_record)
+
+            if bibcode is not None:
+
+                final_collection_query = session.query(models.FinalCollectionTable).filter(models.FinalCollectionTable.bibcode == bibcode).first()
+
+                out_record = {'bibcode' : bibcode,
+                              'scix_id' : final_collection_query.scix_id,
+                              'collections' : final_collection_query.collection}
+                record_list.append(out_record)
+
+            if scix_id is not None:
+
+                final_collection_query = session.query(models.FinalCollectionTable).filter(models.FinalCollectionTable.scix_id == scix_id).first()
+
+                out_record = {'bibcode' : final_collection_query.bibcode,
+                              'scix_id' : scix_id,
+                              'collections' : final_collection_query.collection}
+                record_list.append(out_record)
+
+            return record_list
+
 
     # def update_validated_records(self, run_name):
     def update_validated_records(self, run_id):
         """
         Updates validated records in the database
 
-        :param: run_id- Boolean
+        :param: run_id- integer
         :return: boolean - whether update successful
         """
         print(f'Updating run_id: {run_id}')
@@ -285,6 +335,7 @@ class SciXClassifierCelery(ADSCelery):
                         session.commit()
                         success_list.append("success")
 
+                logger.info(f'List of validated records: {record_list}')
                 return record_list, success_list
  
 

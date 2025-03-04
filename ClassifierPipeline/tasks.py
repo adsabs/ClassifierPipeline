@@ -247,13 +247,24 @@ def task_message_to_master(message):
         }
     :return: no return
     """
+    # if isinstance(message, dict):
+    #     out_message = utils.list_to_ClassifyResponseRecordList([message])
+    # if isinstance(message, list):
+    #     out_message = utils.list_to_ClassifyResponseRecordList(message)
+    # logger.info(f"Forwarding message to Master - Message: {out_message}")
+    # # app.forward_message(out_message, pipeline='master')
+    # app.forward_message(out_message)
+# def dict_to_ClassifyResponseRecord(input_dict):
     if isinstance(message, dict):
-        out_message = utils.list_to_ClassifyResponseRecordList([message])
+        out_message = utils.dict_to_ClassifyResponseRecord(message)
+        logger.info(f"Forwarding message to Master - Message: {out_message}")
+        app.forward_message(out_message)
     if isinstance(message, list):
-        out_message = utils.list_to_ClassifyResponseRecordList(message)
-    logger.info(f"Forwarding message to Master - Message: {out_message}")
+        for msg in message:
+            out_message = utils.dict_to_ClassifyResponseRecord(msg)
+            logger.info(f"Forwarding message to Master - Message: {out_message}")
     # app.forward_message(out_message, pipeline='master')
-    app.forward_message(out_message)
+            app.forward_message(out_message)
 
 # @app.task(queue="classify-record")
 # @app.task(queue="update-record")
@@ -271,7 +282,10 @@ def task_update_validated_records(message):
     record = utils.classifyRequestRecordList_to_list(message)[0]
     record_list, success_list = app.update_validated_records(record['run_id'])
     for record, success in zip(record_list, success_list):
+        logger.info(f"Record: {record}")
+        logger.info(f"Success: {success}")
         if success == "success":
+            logger.info(f"Sending record to master: {record}")
             task_message_to_master(record)
             # out_message = utils.list_to_ClassifyResponseRecordList(message)
             # logger.info(f"Forwarding message to Master - Message: {out_message}")
