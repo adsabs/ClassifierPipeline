@@ -121,7 +121,7 @@ class SciXClassifierCelery(ADSCelery):
         with self.session_scope() as session:
 
             # Initial indexing of automatic classification results
-            if record['operation_step'] == 'classify':
+            if record['operation_step'] == 'classify' or record['operation_step'] == 'classify_verify':
                 logger.info('Indexing new record')
 
                 # Model Table
@@ -269,6 +269,8 @@ class SciXClassifierCelery(ADSCelery):
 
                 for record in run_id_query:
 
+                    logger.info(f'Record bibcode: {record.bibcode}, scix_id: {record.scix_id}')
+
                     final_collection_query = session.query(models.FinalCollectionTable).filter(or_(and_(models.FinalCollectionTable.scix_id == record.scix_id, models.FinalCollectionTable.scix_id != None), and_(models.FinalCollectionTable.bibcode == record.bibcode, models.FinalCollectionTable.bibcode != None))).order_by(models.FinalCollectionTable.created.desc()).first()
 
                     out_record = {'bibcode' : record.bibcode,
@@ -294,6 +296,7 @@ class SciXClassifierCelery(ADSCelery):
                               'collections' : final_collection_query.collection}
                 record_list.append(out_record)
 
+            logger.info(f'Record list: {record_list}')
             return record_list
 
 
@@ -305,38 +308,29 @@ class SciXClassifierCelery(ADSCelery):
         :param: run_id- integer
         :return: boolean - whether update successful
         """
-        print(f'Updating run_id: {run_id}')
+        logger.info(f'Updating run_id: {run_id}')
 
+        record_list = self.query_final_collection_table(run_id=run_id)
+
+        success_list = []
         with self.session_scope() as session:
 
-            run_query = session.query(models.RunTable).filter(models.RunTable.id == run_id).first()
+            for record in record_list:
 
-            if run_query is not None:
+                # logger.info(f'Record bibcode: {record.bibcode}, scix_id: {record.scix_id}')
+                # final_collection_query = session.query(models.FinalCollectionTable).filter(or_(and_(models.FinalCollectionTable.scix_id == record.scix_id, models.FinalCollectionTable.scix_id != None), and_(models.FinalCollectionTable.bibcode == record.bibcode, models.FinalCollectionTable.bibcode != None))).order_by(models.FinalCollectionTable.created.desc()).first()
 
-                run_id_query = session.query(models.ScoreTable).filter(models.ScoreTable.run_id == run_query.id).all()
 
-                record_list = []
-                success_list = []
-                for record in run_id_query:
+                logger.info(f'Record to update as validated: {record}')
+                update_final_collection_query = session.query(models.FinalCollectionTable).filter(and_(or_(and_(models.FinalCollectionTable.scix_id == record['scix_id'], models.FinalCollectionTable.scix_id != None), and_(models.FinalCollectionTable.bibcode == record['bibcode'], models.FinalCollectionTable.bibcode != None))), models.FinalCollectionTable.validated == False).order_by(models.FinalCollectionTable.created.desc()).first()
 
-                    final_collection_query = session.query(models.FinalCollectionTable).filter(or_(and_(models.FinalCollectionTable.scix_id == record.scix_id, models.FinalCollectionTable.scix_id != None), and_(models.FinalCollectionTable.bibcode == record.bibcode, models.FinalCollectionTable.bibcode != None))).order_by(models.FinalCollectionTable.created.desc()).first()
+                if update_final_collection_query is not None:
+                    update_final_collection_query.validated = True
+                    session.commit()
+                    success_list.append("success")
 
-                    out_record = {'bibcode' : record.bibcode,
-                                  'scix_id' : record.scix_id,
-                                  'collections' : final_collection_query.collection}
-                    record_list.append(out_record)
-
-                    logger.info(f'Record to update as validated: {record}')
-                    update_final_collection_query = session.query(models.FinalCollectionTable).filter(and_(or_(and_(models.FinalCollectionTable.scix_id == record.scix_id, models.FinalCollectionTable.scix_id != None), and_(models.FinalCollectionTable.bibcode == record.bibcode, models.FinalCollectionTable.bibcode != None))), models.FinalCollectionTable.validated == False).order_by(models.FinalCollectionTable.created.desc()).first()
-                    # update_final_collection_query = session.query(models.FinalCollectionTable).filter(and_(or_(models.FinalCollectionTable.scix_id == record.scix_id, models.FinalCollectionTable.bibcode == record.bibcode), models.FinalCollectionTable.validated == False)).order_by(models.FinalCollectionTable.created.desc()).first()
-
-                    if update_final_collection_query is not None:
-                        update_final_collection_query.validated = True
-                        session.commit()
-                        success_list.append("success")
-
-                logger.info(f'List of validated records: {record_list}')
-                return record_list, success_list
+        logger.info(f'List of validated records: {record_list}')
+        return record_list, success_list
  
 
 

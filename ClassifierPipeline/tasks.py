@@ -222,8 +222,15 @@ def task_index_classified_record(message):
 
     record, success = app.index_record(record)
     if success == "record_indexed":
-        logger.info("Record indexed, outputting results")
-        app.add_record_to_output_file(record)
+        if record['operation_step'] == 'classify_verify':
+            logger.info("Record indexed, outputting results")
+            app.add_record_to_output_file(record)
+        if record['operation_step'] == 'classify':
+            logger.info("Record indexed, outputting results")
+            app.add_record_to_output_file(record)
+            message = utils.list_to_ClassifyRequestRecordList([record])
+            task_resend_to_master(message)
+
     elif success == "record_validated":
         # message = utils.dict_to_ClassifyResponseRecord(record)
         # message = utils.dict_to_ClassifyResponseRecord([record])
@@ -267,7 +274,33 @@ def task_message_to_master(message):
             app.forward_message(out_message)
 
 # @app.task(queue="classify-record")
-# @app.task(queue="update-record")
+@app.task(queue="update-record")
+def task_resend_to_master(message):
+    """
+    Resend records to master based on bibcode, scix_id or run_id
+    """
+    logger.info(f"Resending message to master: {message}")
+
+    request_list = utils.classifyRequestRecordList_to_list(message)
+
+    logger.debug('Request list: {}'.format(request_list))
+    for request in request_list:
+        logger.info('Request: {}'.format(request))
+
+        if 'bibcode' in request:
+            record_list = app.query_final_collection_table(bibcode=request['bibcode'])
+        elif 'scix_id' in request:
+            record_list = app.query_final_collection_table(scix_id=request['scix_id'])
+        elif 'run_id' in request:
+            record_list = app.query_final_collection_table(run_id=request['run_id'])
+
+        for record in record_list:
+            logger.info(f"Sending record to master: {record}")
+            task_message_to_master(record)
+
+
+# @app.task(queue="classify-record")
+@app.task(queue="update-record")
 def task_update_validated_records(message):
     """
     Update all records that have been validated that have same run_id
