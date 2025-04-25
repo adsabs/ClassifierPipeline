@@ -1,27 +1,16 @@
-# print('app - 00')
 import os
 import json
 import pickle
 import zlib
 import csv
 
-# print('app - 01')
 import ClassifierPipeline.models as models
 from adsputils import get_date, ADSCelery, u2asc
 from contextlib import contextmanager
 from sqlalchemy import create_engine, desc, and_, or_
 from sqlalchemy.orm import scoped_session, sessionmaker
 from adsputils import load_config, setup_logging
-# print('app - 02')
 
-# global objects; we could make them belong to the app object but it doesn't seem necessary
-# unless two apps with a different endpint/config live along; TODO: move if necessary
-# cache = cachetools.TTLCache(maxsize=1024, ttl=3600, timer=time.time, missing=None, getsizeof=None)
-# orcid_cache = cachetools.TTLCache(maxsize=1024, ttl=3600, timer=time.time, missing=None, getsizeof=None)
-# ads_cache = cachetools.TTLCache(maxsize=1024, ttl=3600, timer=time.time, missing=None, getsizeof=None)
-# bibcode_cache = cachetools.TTLCache(maxsize=2048, ttl=3600, timer=time.time, missing=None, getsizeof=None)
-
-# ALLOWED_CATEGORIES = set(['astronomy', 'planetary science', 'heliophysics', 'earth science', 'physics', 'other physics', 'other'])
 
 
 proj_home = os.path.realpath(os.path.join(os.path.dirname(__file__), "../"))
@@ -30,12 +19,8 @@ logger = setup_logging('app.py', proj_home=proj_home,
                         level=config.get('LOGGING_LEVEL', 'INFO'),
                         attach_stdout=config.get('LOG_STDOUT', True))
 
-# logger.info('Config file {}'.format(config))
-
-# print('app - 03')
 ALLOWED_CATEGORIES = set(config['ALLOWED_CATEGORIES'])
 
-# print('app - 04')
 class SciXClassifierCelery(ADSCelery):
         
 
@@ -210,7 +195,6 @@ class SciXClassifierCelery(ADSCelery):
                     check_final_collection_query.final_collection = final_collections
                     session.commit()
 
-                # session.close()
                 return record, "record_indexed"
                 
             else:
@@ -228,14 +212,12 @@ class SciXClassifierCelery(ADSCelery):
                     session.commit()
                     overrides_id = override_row.id
 
-                    # update_scores_query = session.query(models.ScoreTable).filter(models.ScoreTable.bibcode == record['bibcode']).order_by(models.ScoreTable.created.desc()).all()
                     update_scores_query = session.query(models.ScoreTable).filter(or_(and_(models.ScoreTable.scix_id == record['scix_id'], models.ScoreTable.scix_id != None), and_(models.ScoreTable.bibcode == record['bibcode'], models.ScoreTable.bibcode != None))).order_by(models.ScoreTable.created.desc()).all()
                     logger.info(f'update_scores_query: {update_scores_query}')
                     for element in update_scores_query:
                         element.overrides_id = overrides_id
                         session.commit()
 
-                    # update_final_collection_query = session.query(models.FinalCollectionTable).filter(models.FinalCollectionTable.bibcode == record['bibcode']).order_by(models.FinalCollectionTable.created.desc()).first()
                     update_final_collection_query = session.query(models.FinalCollectionTable).filter(or_(and_(models.FinalCollectionTable.scix_id == record['scix_id'], models.FinalCollectionTable.scix_id != None), and_(models.FinalCollectionTable.bibcode == record['bibcode'], models.FinalCollectionTable.bibcode != None))).order_by(models.FinalCollectionTable.created.desc()).first()
 
                     logger.info(f'update_final_collection_query: {update_final_collection_query}')
@@ -300,7 +282,6 @@ class SciXClassifierCelery(ADSCelery):
             return record_list
 
 
-    # def update_validated_records(self, run_name):
     def update_validated_records(self, run_id):
         """
         Updates validated records in the database
@@ -316,9 +297,6 @@ class SciXClassifierCelery(ADSCelery):
         with self.session_scope() as session:
 
             for record in record_list:
-
-                # logger.info(f'Record bibcode: {record.bibcode}, scix_id: {record.scix_id}')
-                # final_collection_query = session.query(models.FinalCollectionTable).filter(or_(and_(models.FinalCollectionTable.scix_id == record.scix_id, models.FinalCollectionTable.scix_id != None), and_(models.FinalCollectionTable.bibcode == record.bibcode, models.FinalCollectionTable.bibcode != None))).order_by(models.FinalCollectionTable.created.desc()).first()
 
 
                 logger.info(f'Record to update as validated: {record}')

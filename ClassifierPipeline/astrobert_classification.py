@@ -21,26 +21,21 @@ logger = setup_logging('astrobert_classification.py', proj_home=proj_home,
 
 # Define model paths
 pretrained_model_name_or_path = config.get('CLASSIFICATION_PRETRAINED_MODEL', None)
-# pretrained_model_name_or_path = "/app/ClassifierPipeline/tests/models/checkpoint-32100/"
 revision = config.get('CLASSIFICATION_PRETRAINED_MODEL_REVISION',None)
 tokenizer_model_name_or_path = config.get('CLASSIFICATION_PRETRAINED_MODEL_TOKENIZER', None)
 
 # Load model and tokenizer
-# labels = ['Astronomy', 'Heliophysics', 'Planetary Science', 'Earth Science', 'NASA-funded Biophysics', 'Other Physics', 'Other', 'Text Garbage']
 labels=config['ALLOWED_CATEGORIES']
 id2label = {i:c for i,c in enumerate(labels) }
 label2id = {v:k for k,v in id2label.items()}
 
-# import pdb;pdb.set_trace()
 
 tokenizer = AutoTokenizer.from_pretrained(pretrained_model_name_or_path=tokenizer_model_name_or_path,revision=revision, do_lower_case=False)
 
 # load model
-# import pdb;pdb.set_trace()
 model = AutoModelForSequenceClassification.from_pretrained(pretrained_model_name_or_path=pretrained_model_name_or_path,revision=revision,num_labels=len(labels),problem_type='multi_label_classification',id2label=id2label,label2id=label2id)
 
 logger.info('Loaded model - preamble of astrobert_classification')
-# import pdb; pdb.set_trace()
 
 class AstroBERTClassification():
 
@@ -62,7 +57,6 @@ class AstroBERTClassification():
         '''
             
         # int() rounds towards zero, so down for positive values
-        # import pdb; pdb.set_trace()
         num_splits = max(1, int(len(input_ids)/window_stride))
         
         split_input_ids = [input_ids[i*window_stride:i*window_stride+window_size] for i in range(num_splits)]
@@ -106,30 +100,22 @@ class AstroBERTClassification():
         '''
         
         logger.info('Starting batch_assign_SciX_categories')
-        # import pdb; pdb.set_trace()
         
         # optimal default thresholds based on experimental results
         if score_thresholds is None:
             score_thresholds = [0.0 for _ in range(len(labels)) ]
 
         
-        # import pdb; pdb.set_trace()
         
         list_of_texts_tokenized_input_ids = tokenizer(list_of_texts, add_special_tokens=False)['input_ids']
-        # list_of_texts_tokenized_input_ids = tokenizer(list_of_texts, add_special_tokens=False)['input_ids'][0]
-        # import pdb; pdb.set_trace()
 
         logger.info('Tokenized input ids')
         logger.info('List of texts tokenized input ids {}'.format(list_of_texts_tokenized_input_ids))
-        # import pdb; pdb.set_trace()
 
         
         # split
         list_of_split_input_ids = [input_ids_splitter(t, window_size=window_size, window_stride=window_stride) for t in list_of_texts_tokenized_input_ids]
-        # Full list of text
-        # list_of_split_input_ids = input_ids_splitter(list_of_texts_tokenized_input_ids, window_size=window_size, window_stride=window_stride)
 
-        # import pdb; pdb.set_trace()
         
         logger.info('Split input ids')
         # add special tokens
