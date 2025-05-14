@@ -1,9 +1,7 @@
 import os
-# from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from torch import no_grad, tensor
 from adsputils import load_config, setup_logging
 from ClassifierPipeline.astrobert_classification import AstroBERTClassification
-# from astrobert_classification import AstroBERTClassification
 
 proj_home = os.path.realpath(os.path.join(os.path.dirname(__file__), "../"))
 config = load_config(proj_home=proj_home)
@@ -55,7 +53,7 @@ class Classifier:
         return(split_input_ids_with_tokens)
 
         
-    def batch_assign_SciX_categories(self, list_of_texts, score_combiner='max', score_thresholds=None, window_size=510,  window_stride=500):
+    def batch_score_SciX_categories(self, list_of_texts, score_combiner='max', score_thresholds=None, window_size=510,  window_stride=500):
         '''
         Given a list of texts, assigns SciX categories to each of them.
         Returns two items:
@@ -74,44 +72,32 @@ class Classifier:
         window_stride = 500    
         '''
         
-        logger.info('Starting batch_assign_SciX_categories')
-        # import pdb; pdb.set_trace()
+        logger.info(f'Classifying {len(list_of_texts)} records')
         
         # optimal default thresholds based on experimental results
         if score_thresholds is None:
             score_thresholds = [0.0 for _ in range(len(self.labels)) ]
 
-        
-        # import pdb; pdb.set_trace()
-
-        logger.info('lists of texts')
-        logger.info('List of texts {}'.format(list_of_texts))
-
-        # if any(isinstance(i, list) for i in list_of_texts) is False:
-        #     list_of_texts = [list_of_texts]
+        logger.debug('lists of texts')
+        logger.debug('List of texts {}'.format(list_of_texts))
         
         list_of_texts_tokenized_input_ids = self.tokenizer(list_of_texts, add_special_tokens=False)['input_ids']
-        # list_of_texts_tokenized_input_ids = tokenizer(list_of_texts, add_special_tokens=False)['input_ids'][0]
-        # import pdb; pdb.set_trace()
 
-        logger.info('Tokenized input ids')
-        logger.info('List of texts tokenized input ids {}'.format(list_of_texts_tokenized_input_ids))
-        # import pdb; pdb.set_trace()
+        logger.debug('Tokenized input ids')
+        logger.debug('List of texts tokenized input ids {}'.format(list_of_texts_tokenized_input_ids))
 
         
         # split
         list_of_split_input_ids = [self.input_ids_splitter(t, window_size=window_size, window_stride=window_stride) for t in list_of_texts_tokenized_input_ids]
         # Full list of text
         # list_of_split_input_ids = input_ids_splitter(list_of_texts_tokenized_input_ids, window_size=window_size, window_stride=window_stride)
-
-        # import pdb; pdb.set_trace()
         
-        logger.info('Split input ids')
+        logger.debug('Split input ids')
         # add special tokens
         list_of_split_input_ids_with_tokens = [self.add_special_tokens_split_input_ids(s, self.tokenizer) for s in list_of_split_input_ids]
         
-        logger.info('Split input ids with tokens')
-        logger.info('List of split input ids with tokens {}'.format(list_of_split_input_ids_with_tokens))
+        logger.debug('Split input ids with tokens')
+        logger.debug('List of split input ids with tokens {}'.format(list_of_split_input_ids_with_tokens))
         
         # list to return
         list_of_categories = []
@@ -122,30 +108,23 @@ class Classifier:
             # for split_input_ids_with_tokens in tqdm(list_of_split_input_ids_with_tokens):
             for split_input_ids_with_tokens in list_of_split_input_ids_with_tokens:
                 # make predictions
-                logger.info('Making predictions')
-                logger.info('Predictions with model {}'.format(self.model))
-                # logger.info('split_input_ids_with_tokens {}'.format(split_input_ids_with_tokens))
-                # import pdb; pdb.set_trace()
+                logger.debug('Making predictions')
+                logger.debug('Predictions with model {}'.format(self.model))
                 try:
-                    logger.info('Really making predictions')
+                    logger.debug('Really making predictions')
                     predictions = self.model(input_ids=tensor(split_input_ids_with_tokens))
                 except Exception as e:
                     logger.exception(f'Failed with: {str(e)}')
                     raise e
                 try:
-                    logger.info('Really making predictions - really')
+                    logger.debug('Really making predictions - really')
                     predictions = predictions.logits.sigmoid()
                 except Exception as e:
                     logger.exception(f'Failed with: {str(e)}')
-                # try:
-                #     logger.info('Really making predictions - really - I mean it')
-                #     predictions = predictions.sigmoid()
-                # except Exception as e:
-                #     logger.exception(f'Failed with: {str(e)}')
 
-                logger.info('Predictions {}'.format(predictions))
+                logger.debug('Predictions {}'.format(predictions))
                 
-                logger.info('COmbining predictions')
+                logger.debug('COmbining predictions')
                 # combine into one prediction
                 if score_combiner=='mean':
                     prediction = predictions.mean(dim=0)
@@ -156,16 +135,14 @@ class Classifier:
                     prediction = score_combiner(predictions)
                 
 
-                logger.info('Appending predictions')
+                logger.debug('Appending predictions')
                 list_of_scores.append(prediction.tolist())
                 # filter by scores above score_threshold
 
-                logger.info('Appending categories')
+                logger.debug('Appending categories')
                 list_of_categories.append([self.id2label[index] for index,score in enumerate(prediction) if score>=score_thresholds[index]])
         
-        logger.info('Ran forward call')
+        logger.debug('Ran forward call')
         return(list_of_categories, list_of_scores)
         
-    # classifier = AstroBERTClassification()
-    # scores = classifier.batch_assign_SciX_categories(text)
 

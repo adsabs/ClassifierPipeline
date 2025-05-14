@@ -171,7 +171,7 @@ def task_send_input_record_to_classifier(message):
     if fake_data is False:
         logger.info('Performing Inference')
         input_text = record['title'] + ' ' + record['abstract']
-        categories, scores = classifier.batch_assign_SciX_categories([input_text])
+        categories, scores = classifier.batch_score_SciX_categories([input_text])
         record['categories'] = categories[0]
         record['scores'] = scores[0]
         logger.info('Categories: {}'.format(categories))
