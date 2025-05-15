@@ -24,13 +24,6 @@ ALLOWED_CATEGORIES = set(config['ALLOWED_CATEGORIES'])
 class SciXClassifierCelery(ADSCelery):
         
 
-    def is_blank(s):
-        """ Check if a string is not None, not empty, and not only whitespace
-        Based on https://stackoverflow.com/questions/9573244/how-to-check-if-the-string-is-empty-in-python
-        """
-        # return bool(not s and s.isspace())
-        return not (s and not s.isspace())
-
     def handle_message_payload(self, message=None, payload=None):
         """
         Handles the message payload
@@ -61,7 +54,7 @@ class SciXClassifierCelery(ADSCelery):
         """
         row = [record['bibcode'], record['scix_id'],record['title'], record['abstract'],record['run_id'], ', '.join(config['ALLOWED_CATEGORIES']), ', '.join(map(str,record['scores'])), ', '.join(record['collections']), ', '.join(map(str, record['collection_scores'])), config['ADDITIONAL_EARTH_SCIENCE_PROCESSING'], '']
 
-        logger.info(f'Writing {row}')
+        logger.debug(f'Writing {row}')
         with open(record['output_path'], 'a', newline='') as file:
             writer = csv.writer(file, delimiter='\t')
             writer.writerow(row)
@@ -74,13 +67,13 @@ class SciXClassifierCelery(ADSCelery):
         :param: none 
         :return: str Run table row ID
         """
-        logger.info('Indexing run')
         with self.session_scope() as session:
 
             run_row = models.RunTable()
 
             session.add(run_row)
             session.commit()
+            logger.info(f'Indexing run {run_row.id}')
 
             return run_row.id
 
@@ -93,8 +86,8 @@ class SciXClassifierCelery(ADSCelery):
         :return: boolean - whether record successfuly added
                 to the database
         """
-        logger.info('Indexing record')
-        logger.info(f'Record: {record}')
+        logger.debug('Indexing record')
+        logger.debug(f'Record: {record}')
 
         if 'operation_step' not in record:
             record['operation_step'] = 'classify'
@@ -107,7 +100,7 @@ class SciXClassifierCelery(ADSCelery):
 
             # Initial indexing of automatic classification results
             if record['operation_step'] == 'classify' or record['operation_step'] == 'classify_verify':
-                logger.info('Indexing new record')
+                logger.debug('Indexing new record')
 
                 # Model Table
                 model = {'model' : config['CLASSIFICATION_PRETRAINED_MODEL'],
@@ -122,10 +115,10 @@ class SciXClassifierCelery(ADSCelery):
                                               postprocessing=json.dumps(postprocessing)
                                               )
 
-                logger.info('Checking model query')
+                logger.debug('Checking model query')
                 check_model_query = session.query(models.ModelTable).filter(and_(models.ModelTable.model == json.dumps(model), models.ModelTable.postprocessing == json.dumps(postprocessing))).order_by(models.ModelTable.created.desc()).first()
 
-                logger.info(f'Check Model Query: {check_model_query}')
+                logger.debug(f'Check Model Query: {check_model_query}')
                 if check_model_query is None:
                     session.add(model_row)
                     session.commit()
@@ -136,7 +129,7 @@ class SciXClassifierCelery(ADSCelery):
                 # Run Table
                 check_run_query = session.query(models.RunTable).filter(models.RunTable.id == record['run_id']).order_by(models.RunTable.created.desc()).first()
 
-                logger.info(f'Check Run Query: {check_run_query}')
+                logger.debug(f'Check Run Query: {check_run_query}')
                 if check_run_query is not None:
 
                     if check_run_query.model_id != model_id:
@@ -147,7 +140,7 @@ class SciXClassifierCelery(ADSCelery):
                 check_overrides_query = session.query(models.OverrideTable).filter(or_(and_(models.OverrideTable.scix_id == record['scix_id'], models.OverrideTable.scix_id != None), and_(models.OverrideTable.bibcode == record['bibcode'], models.OverrideTable.bibcode != None))).order_by(models.OverrideTable.created.desc()).first()
 
 
-                logger.info(f'Check Overrides Query: {check_overrides_query}')
+                logger.debug(f'Check Overrides Query: {check_overrides_query}')
                 if check_overrides_query is not None:
                     final_collections = check_overrides_query.override
                     overrides_id = check_overrides_query.id
@@ -172,7 +165,7 @@ class SciXClassifierCelery(ADSCelery):
                 check_scores_query = session.query(models.ScoreTable).filter(and_(or_(and_(models.ScoreTable.scix_id == record['scix_id'], models.ScoreTable.scix_id != None), and_(models.ScoreTable.bibcode == record['bibcode'], models.ScoreTable.bibcode != None)), models.ScoreTable.scores == json.dumps(scores), models.ScoreTable.overrides_id == overrides_id, models.ScoreTable.run_id == record['run_id'])).order_by(models.ScoreTable.created.desc()).first()
 
 
-                logger.info(f'Check Scores Query: {check_scores_query}')
+                logger.debug(f'Check Scores Query: {check_scores_query}')
                 if check_scores_query is None:
                     session.add(score_row)
                     session.commit()
@@ -187,7 +180,7 @@ class SciXClassifierCelery(ADSCelery):
                 # Final Collection Table
                 check_final_collection_query = session.query(models.FinalCollectionTable).filter(or_(and_(models.FinalCollectionTable.scix_id == record['scix_id'], models.FinalCollectionTable.scix_id != None), and_(models.FinalCollectionTable.bibcode == record['bibcode'], models.FinalCollectionTable.bibcode != None))).order_by(models.FinalCollectionTable.created.desc()).first()
 
-                logger.info(f'Check Final Collections Query: {check_final_collection_query}')
+                logger.debug(f'Check Final Collections Query: {check_final_collection_query}')
                 if check_final_collection_query is None:
                     session.add(final_collections_row)
                     session.commit()
@@ -198,12 +191,12 @@ class SciXClassifierCelery(ADSCelery):
                 return record, "record_indexed"
                 
             else:
-                logger.info('Updating validated record')
+                logger.debug('Updating validated record')
 
                 # Check for existing override
                 check_overrides_query = session.query(models.OverrideTable).filter(and_(or_(and_(models.OverrideTable.scix_id == record['scix_id'], models.OverrideTable.scix_id != None), and_(models.OverrideTable.bibcode == record['bibcode'], models.OverrideTable.bibcode != None))), models.OverrideTable.override == record['override']).order_by(models.OverrideTable.created.desc()).first()
 
-                logger.info(f'Check overrides query: {check_overrides_query}')
+                logger.debug(f'Check overrides query: {check_overrides_query}')
                 if check_overrides_query is None:
                     override_row = models.OverrideTable(bibcode=record['bibcode'],
                                                         scix_id=record['scix_id'],
@@ -213,15 +206,15 @@ class SciXClassifierCelery(ADSCelery):
                     overrides_id = override_row.id
 
                     update_scores_query = session.query(models.ScoreTable).filter(or_(and_(models.ScoreTable.scix_id == record['scix_id'], models.ScoreTable.scix_id != None), and_(models.ScoreTable.bibcode == record['bibcode'], models.ScoreTable.bibcode != None))).order_by(models.ScoreTable.created.desc()).all()
-                    logger.info(f'update_scores_query: {update_scores_query}')
+                    logger.debug(f'update_scores_query: {update_scores_query}')
                     for element in update_scores_query:
                         element.overrides_id = overrides_id
                         session.commit()
 
                     update_final_collection_query = session.query(models.FinalCollectionTable).filter(or_(and_(models.FinalCollectionTable.scix_id == record['scix_id'], models.FinalCollectionTable.scix_id != None), and_(models.FinalCollectionTable.bibcode == record['bibcode'], models.FinalCollectionTable.bibcode != None))).order_by(models.FinalCollectionTable.created.desc()).first()
 
-                    logger.info(f'update_final_collection_query: {update_final_collection_query}')
-                    logger.info(f'update_final_collection_query with override: {record["override"]}')
+                    logger.debug(f'update_final_collection_query: {update_final_collection_query}')
+                    logger.debug(f'update_final_collection_query with override: {record["override"]}')
                     update_final_collection_query.collection = record['override']
                     update_final_collection_query.validated = True
                     session.commit()
@@ -251,7 +244,7 @@ class SciXClassifierCelery(ADSCelery):
 
                 for record in run_id_query:
 
-                    logger.info(f'Record bibcode: {record.bibcode}, scix_id: {record.scix_id}')
+                    logger.debug(f'Record bibcode: {record.bibcode}, scix_id: {record.scix_id}')
 
                     final_collection_query = session.query(models.FinalCollectionTable).filter(or_(and_(models.FinalCollectionTable.scix_id == record.scix_id, models.FinalCollectionTable.scix_id != None), and_(models.FinalCollectionTable.bibcode == record.bibcode, models.FinalCollectionTable.bibcode != None))).order_by(models.FinalCollectionTable.created.desc()).first()
 
@@ -278,7 +271,7 @@ class SciXClassifierCelery(ADSCelery):
                               'collections' : final_collection_query.collection}
                 record_list.append(out_record)
 
-            logger.info(f'Record list: {record_list}')
+            logger.debug(f'Record list: {record_list}')
             return record_list
 
 
@@ -299,7 +292,7 @@ class SciXClassifierCelery(ADSCelery):
             for record in record_list:
 
 
-                logger.info(f'Record to update as validated: {record}')
+                logger.debug(f'Record to update as validated: {record}')
                 update_final_collection_query = session.query(models.FinalCollectionTable).filter(and_(or_(and_(models.FinalCollectionTable.scix_id == record['scix_id'], models.FinalCollectionTable.scix_id != None), and_(models.FinalCollectionTable.bibcode == record['bibcode'], models.FinalCollectionTable.bibcode != None))), models.FinalCollectionTable.validated == False).order_by(models.FinalCollectionTable.created.desc()).first()
 
                 if update_final_collection_query is not None:
@@ -307,7 +300,7 @@ class SciXClassifierCelery(ADSCelery):
                     session.commit()
                     success_list.append("success")
 
-        logger.info(f'List of validated records: {record_list}')
+        logger.debug(f'List of validated records: {record_list}')
         return record_list, success_list
  
 
