@@ -36,10 +36,6 @@ logger = setup_logging('run.py', proj_home=proj_home,
                         level=config.get('LOGGING_LEVEL', 'INFO'),
                         attach_stdout=config.get('LOG_STDOUT', False))
 
-# test_message = ClassifyRequestRecordList()
-# entry = message_test.classify_requests.add()
-
-# import pdb;pdb.set_trace()
 
 # =============================== FUNCTIONS ======================================= #
 
@@ -111,10 +107,6 @@ def records2_fake_protobuf(record):
     protobuf
     """
 
-    # message = classifyrecord_pb2.ClassifyRequestRecordList()
-    # message['classifyRequests'] = input_list
-    # message = json.dumps(message)
-    # import pdb;pdb.set_trace()
     with open(config.get('TEST_INPUT_DATA'), 'r') as f:
         message_json = f.read()
 
@@ -123,7 +115,6 @@ def records2_fake_protobuf(record):
 
     out_message = parsed_message.copy()
     out_message['classifyRequests'] = [record] # protobuf is for list of dictionaries
-    # import pdb;pdb.set_trace()
     out_message = json.dumps(out_message)
 
     return out_message
