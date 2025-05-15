@@ -232,9 +232,9 @@ def task_index_classified_record(message):
     logger.debug(f'Record type: {type(message)}')
 
     record_id = None
-    if 'scix_id' is in record:
+    if 'scix_id' in record:
         record_id = record['scix_id']
-    if 'bibcode' is in record:
+    if 'bibcode' in record:
         record_id = record['bibcode']
 
     record, success = app.index_record(record)
@@ -303,9 +303,9 @@ def task_resend_to_master(message):
 
         for record in record_list:
             record_id = None
-            if 'scix_id' is in record:
+            if 'scix_id' in record:
                 record_id = record['scix_id']
-            if 'bibcode' is in record:
+            if 'bibcode' in record:
         record_id = record['bibcode']
             logger.info(f"Sending record {record_id} to master")
             task_message_to_master(record)
@@ -331,9 +331,9 @@ def task_update_validated_records(message):
         logger.debug(f"Success: {success}")
         if success == "success":
             record_id = None
-            if 'scix_id' is in record:
+            if 'scix_id' in record:
                 record_id = record['scix_id']
-            if 'bibcode' is in record:
+            if 'bibcode' in record:
             logger.info(f"Sending record {record_id} to master")
             task_message_to_master(record)
 
