@@ -11,7 +11,6 @@ import ClassifierPipeline.utilities as utils
 from ClassifierPipeline.classifier import Classifier
 from adsputils import load_config, setup_logging
 from kombu import Queue
-# import classifyrecord_pb2
 from google.protobuf.json_format import Parse, MessageToDict
 from adsmsg import ClassifyRequestRecord, ClassifyRequestRecordList, ClassifyResponseRecord, ClassifyResponseRecordList
 
@@ -306,7 +305,7 @@ def task_resend_to_master(message):
             if 'scix_id' in record:
                 record_id = record['scix_id']
             if 'bibcode' in record:
-        record_id = record['bibcode']
+                record_id = record['bibcode']
             logger.info(f"Sending record {record_id} to master")
             task_message_to_master(record)
 
@@ -334,6 +333,7 @@ def task_update_validated_records(message):
             if 'scix_id' in record:
                 record_id = record['scix_id']
             if 'bibcode' in record:
+                record_id = record['bibcode']
             logger.info(f"Sending record {record_id} to master")
             task_message_to_master(record)
 
