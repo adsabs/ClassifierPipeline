@@ -17,7 +17,7 @@ import time
 import json
 import argparse
 import copy
-from ClassifierPipeline.tasks import task_update_record, task_update_validated_records, task_index_classified_record
+from ClassifierPipeline.tasks import task_update_record, task_update_validated_records, task_index_classified_record, task_resend_to_master
 # import ClassifierPipeline.tasks as tasks
 # from ClassifierPipeline.utilities import check_is_allowed_category
 import ClassifierPipeline.utilities as utils
@@ -36,10 +36,6 @@ logger = setup_logging('run.py', proj_home=proj_home,
                         level=config.get('LOGGING_LEVEL', 'INFO'),
                         attach_stdout=config.get('LOG_STDOUT', False))
 
-# test_message = ClassifyRequestRecordList()
-# entry = message_test.classify_requests.add()
-
-# import pdb;pdb.set_trace()
 
 # =============================== FUNCTIONS ======================================= #
 
@@ -111,10 +107,6 @@ def records2_fake_protobuf(record):
     protobuf
     """
 
-    # message = classifyrecord_pb2.ClassifyRequestRecordList()
-    # message['classifyRequests'] = input_list
-    # message = json.dumps(message)
-    # import pdb;pdb.set_trace()
     with open(config.get('TEST_INPUT_DATA'), 'r') as f:
         message_json = f.read()
 
@@ -123,7 +115,6 @@ def records2_fake_protobuf(record):
 
     out_message = parsed_message.copy()
     out_message['classifyRequests'] = [record] # protobuf is for list of dictionaries
-    # import pdb;pdb.set_trace()
     out_message = json.dumps(out_message)
 
     return out_message
@@ -228,6 +219,29 @@ if __name__ == '__main__':
                         action='store_true',
                         help='Run tests')
 
+    parser.add_argument('-s',
+                        '--resend',
+                        dest='resend',
+                        action='store_true',
+                        help='Resend results to Master Pipeline')
+
+    parser.add_argument('-b',
+                        '--bibcode',
+                        dest='bibcode',
+                        action='store',
+                        help='Bibcode of record to resend')
+
+    parser.add_argument('-x',
+                        '--scix_id',
+                        dest='scix_id',
+                        action='store',
+                        help='Scix_id of record to resend')
+
+    parser.add_argument('-i',
+                        '--run_id',
+                        dest='run_id',
+                        action='store',
+                        help='Run_id of record batch to resend')
 
 
     args = parser.parse_args()
@@ -244,6 +258,25 @@ if __name__ == '__main__':
     if args.new_records:
         print("Processing new records")
         batch_new_records(records_path)
+
+    if args.bibcode:
+        print('Resending bibcode')
+        bibcode = args.bibcode
+
+    if args.resend:
+
+        if args.bibcode:
+            print(f'Resending bibcode {args.bibcode}')
+            record = {'bibcode' : args.bibcode}
+        if args.scix_id:
+            print(f'Resending scix_id {args.scix_id}')
+            record = {'scix_id' : args.scix_id}
+        if args.run_id:
+            print(f'Resending run_id {args.run_id}')
+            record = {'run_id' : args.run_id}
+
+        message = utils.list_to_ClassifyRequestRecordList([record])
+        task_resend_to_master(message)
 
     if args.test:
         logger.debug("Running tests")

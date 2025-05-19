@@ -58,7 +58,6 @@ def classify_record_from_scores(record):
                 meet_threshold[categories.index('Other')] = False
                 meet_threshold[categories.index('Earth Science')] = True
 
-    # Append collections to record
     record['collections'] = [category for category, threshold in zip(categories, meet_threshold) if threshold is True]
     record['collection_scores'] = [score for score, threshold in zip(scores, meet_threshold) if threshold is True]
     record['collection_scores'] = [round(score, 2) for score in record['collection_scores']]
@@ -153,9 +152,6 @@ def filter_allowed_fields(input_dict, allowed_fields=None,response=False):
     :return: A filtered dictionary with only allowed keys.
     """
     if allowed_fields is None:
-	# allowed_fields = {'bibcode', 'scixId', 'status', 'title', 'abstract', 
-	#	   'operationStep', 'runid', 'override', 'outputPath', 
-	#	   'scores', 'collections', 'collectionScores'}
         if response is False:
             allowed_fields = {'bibcode', 'scix_id', 'status', 'title', 'abstract', 
                             'operation_step', 'run_id', 'override', 'output_path', 
@@ -165,7 +161,6 @@ def filter_allowed_fields(input_dict, allowed_fields=None,response=False):
 
     return {key: value for key, value in input_dict.items() if key in allowed_fields}
 
-# Example usage:
 
 def dict_to_ClassifyRequestRecord(input_dict):
     """
@@ -175,9 +170,6 @@ def dict_to_ClassifyRequestRecord(input_dict):
 
     request_message = ClassifyRequestRecord()
     message = ParseDict(input_dict, request_message)
-
-
-    # logger.info(f'Created ClassifyREquestRecord message from dictionary: {message}')
     return message
 
 def list_to_ClassifyRequestRecordList(input_list):
@@ -196,9 +188,6 @@ def list_to_ClassifyRequestRecordList(input_list):
 
     request_message = ClassifyRequestRecordList()
     message = ParseDict(request_list_dict, request_message)
-
-
-    # logger.info(f'Created ClassifyResponseRecord message from dictionary: {message}')
     return message
 
 
@@ -210,9 +199,6 @@ def dict_to_ClassifyResponseRecord(input_dict):
 
     request_message = ClassifyResponseRecord()
     message = ParseDict(input_dict, request_message)
-
-
-    # logger.info(f'Created ClassifyREquestRecord message from dictionary: {message}')
     return message
 
 def list_to_ClassifyResponseRecordList(input_list):
@@ -223,7 +209,6 @@ def list_to_ClassifyResponseRecordList(input_list):
     input_list = list(map(lambda d: filter_allowed_fields(d, response=True), input_list))
 
     response_list_dict = {
-            # 'classify_responses' : input_list,
             'classifyResponses' : input_list,
             # 'status' : 99
             }
@@ -231,9 +216,6 @@ def list_to_ClassifyResponseRecordList(input_list):
     logger.info(f"Dictionary for Response Message {response_list_dict}")
     response_message = ClassifyResponseRecordList()
     message = ParseDict(response_list_dict, response_message)
-
-
-    # logger.info(f'Created ClassifyResponseRecord message from dictionary: {message}')
     return message
 
 
@@ -280,7 +262,6 @@ def classifyRequestRecordList_to_list(message):
         logger.info(f'Unpacking request: {request}')
         output_list.append(MessageToDict(request,preserving_proto_field_name=True))
 
-    # import pdb;pdb.set_trace()
     logger.info(f'Output list from message: {output_list}')
 
     return output_list

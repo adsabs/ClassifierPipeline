@@ -25,16 +25,12 @@ class ModelTable(Base):
     __tablename__ = 'models'
     id = Column(Integer, primary_key=True)
     model = Column(Text)
-    # revision = Column(Text)
-    # tokenizer = Column(Text)
     postprocessing = Column(Text)
-    # labels = Column(Text)
     created = Column(UTCDateTime, default=get_date)
 
 class OverrideTable(Base):
     __tablename__ = 'overrides'
     id = Column(Integer, primary_key=True)
-    # score_id = Column(Integer, ForeignKey('scores.id'))
     bibcode = Column(String(19))
     scix_id = Column(String(19))
     override = Column(ARRAY(String))
@@ -47,7 +43,6 @@ class FinalCollectionTable(Base):
     scix_id = Column(String(19))
     score_id = Column(Integer, ForeignKey('scores.id'))
     collection = Column(ARRAY(String))
-    # validated = Column(Enum('true', 'false'), default='false')
     validated = Column(Boolean, default=False)
     created = Column(UTCDateTime, default=get_date)
 

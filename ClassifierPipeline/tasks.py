@@ -11,7 +11,6 @@ import ClassifierPipeline.utilities as utils
 from ClassifierPipeline.classifier import Classifier
 from adsputils import load_config, setup_logging
 from kombu import Queue
-# import classifyrecord_pb2
 from google.protobuf.json_format import Parse, MessageToDict
 from adsmsg import ClassifyRequestRecord, ClassifyRequestRecordList, ClassifyResponseRecord, ClassifyResponseRecordList
 
@@ -44,6 +43,7 @@ classifier = Classifier()
 def task_update_record(message,pipeline='classifier', output_format='tsv'):
     """
     Handle the input from the master
+    All input is a classifyRequestRecordList even for a single record
 
     :param message: contains the message inside the packet
         {
@@ -53,29 +53,34 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
          'abstract':String
         }
     :return: no return
-    Handles input for the task
-    This handles input from master checks if input is single bibcode or batch of bibcodes
-    if Single just passes on to classfier tasks
-    if batch will create a batch ID and send to classifier tasks and setup output file 
 
-    :param: message - dictionary
+    :passes to queue: message:
+        {
+          'bibcode': String (19 chars),
+          'scix_id': String (19 chars),
+          'title': string,
+          'abstract': string,
+          'text': string,
+          'operation_step': string,
+          'run_id': int,
+          'output_format': string,
+          'override': 
+          'output_path': string
+        }
     """
 
-    # Always pass a list of records, even just a list of one record
-    print('update record')
     logger.debug(f'Message type: {type(message)}')
-    logger.info(f'Message: {message}')
+    logger.debug(f'Message: {message}')
 
     run_id = app.index_run()
     logger.info('Run ID: {}'.format(run_id))
     operation_step = 'classify'
     output_path = os.path.join(proj_home, 'logs', f'{run_id}_classified.tsv')
 
-    logger.info('Preparing output file: {}'.format(output_path))
     utils.prepare_output_file(output_path)
-    logger.info('Output file prepared')
+    logger.info('Prepared output file: {}'.format(output_path))
 
-    # Delay setting
+    # Delay setting for testing
     delay_message = config.get('DELAY_MESSAGE', False) 
 
     logger.debug("Delay set for queue messages: {}".format(delay_message))
@@ -84,11 +89,9 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
 
     logger.debug('Request list: {}'.format(request_list))
     for request in request_list:
-        logger.info('Request: {}'.format(request))
+        logger.debug('Request: {}'.format(request))
         record_bibcode = None
         record_scix_id = None
-        # record_title = None
-        # record_abstract = None
         if 'bibcode' in request:
             record_bibcode = request['bibcode']
         if 'scix_id' in request:
@@ -114,15 +117,14 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
                   }
 
         # Protobuf takes a list of records
-        logger.info("creating output message")
-        logger.info(f"Record {record}")
-        # out_message = utils.list_to_message([record])
+        logger.debug("creating output message")
+        logger.debug(f"Record {record}")
         out_message = utils.list_to_ClassifyRequestRecordList([record])
 
-        logger.info('Output Record type: {}'.format(type(out_message)))
-        logger.info('Output Record: {}'.format(out_message))
+        logger.debug('Output Record type: {}'.format(type(out_message)))
+        logger.debug('Output Record: {}'.format(out_message))
         if delay_message:
-            logger.info('Using delay')
+            logger.debug('Using delay')
             task_send_input_record_to_classifier.delay(out_message)
         else:
             task_send_input_record_to_classifier(out_message)  
@@ -138,54 +140,56 @@ def task_send_input_record_to_classifier(message):
 
     :param message: contains the message inside the packet
         {
-         'bibcode': String (19 chars),
-         'scix_id': String (19 chars),
-         'title': String,
-         'abstract':String
+          'bibcode': String (19 chars),
+          'scix_id': String (19 chars),
+          'title': string,
+          'abstract': string,
+          'text': string,
+          'operation_step': string,
+          'run_id': int,
+          'output_format': string,
+          'override': 
+          'output_path': string
         }
-    :return: no return
+    :return: no return: passes message packet to queue
     """
 
     delay_message = config.get('DELAY_MESSAGE', False) 
 
-    logger.info("Delay set for queue messages: {}".format(delay_message))
+    logger.debug("Delay set for queue messages: {}".format(delay_message))
 
     fake_data = config.get('FAKE_DATA', False) 
 
-    logger.info("Fake data set for queue messages: {}".format(fake_data))
+    logger.debug("Fake data set for queue messages: {}".format(fake_data))
 
     record = utils.classifyRequestRecordList_to_list(message)[0]
 
     if fake_data is False:
-        logger.info('Performing Inference')
+        logger.debug('Performing Inference')
         input_text = record['title'] + ' ' + record['abstract']
-        categories, scores = classifier.batch_assign_SciX_categories([input_text])
+        categories, scores = classifier.batch_score_SciX_categories([input_text])
         record['categories'] = categories[0]
         record['scores'] = scores[0]
-        logger.info('Categories: {}'.format(categories))
-        logger.info('Allowed Categories: {}'.format(config['ALLOWED_CATEGORIES']))
-        logger.info('Scores: {}'.format(scores))
+        logger.debug('Categories: {}'.format(categories))
+        logger.debug('Allowed Categories: {}'.format(config['ALLOWED_CATEGORIES']))
+        logger.debug('Scores: {}'.format(scores))
     else:
         logger.info('Skipping inference - generating fake data')
         record = utils.return_fake_data(record)
 
 
-    logger.info('RECORD: {}'.format(record))
+    logger.debug('RECORD: {}'.format(record))
 
     # Decision making based on model scores
-    # record = app.classify_record_from_scores(record)
     record = utils.classify_record_from_scores(record)
 
     logger.debug("Record after classification and thresholding: {}".format(record))
     logger.debug("Record Type: {}".format(type(record)))
 
-    # out_message = utils.list_to_message([record])
     out_message = utils.list_to_ClassifyRequestRecordList([record])
 
-    # Write the new classification to the database
     if delay_message:
         task_index_classified_record.delay(out_message)
-        # pass
     else:
         task_index_classified_record(out_message) 
 
@@ -206,6 +210,14 @@ def task_index_classified_record(message):
          'abstract':String,
          'operation_step': String,
          'override': String
+          'title': string,
+          'abstract': string,
+          'text': string,
+          'operation_step': string,
+          'run_id': int,
+          'output_format': string,
+          'override': 
+          'output_path': string
         }
     :return: no return
     """
@@ -214,24 +226,33 @@ def task_index_classified_record(message):
 
     logger.debug("Delay set for queue messages: {}".format(delay_message))
 
-    # record = utils.message_to_list(message)[0]
     record = utils.classifyRequestRecordList_to_list(message)[0]
-    logger.info(f"Record: {record}")
-    logger.info(f'Record type: {type(message)}')
+    logger.debug(f"Record: {record}")
+    logger.debug(f'Record type: {type(message)}')
 
+    record_id = None
+    if 'scix_id' in record:
+        record_id = record['scix_id']
+    if 'bibcode' in record:
+        record_id = record['bibcode']
 
     record, success = app.index_record(record)
     if success == "record_indexed":
-        logger.info("Record indexed, outputting results")
-        app.add_record_to_output_file(record)
+        if record['operation_step'] == 'classify_verify':
+            logger.info(f"Record {record_id} indexed")
+            app.add_record_to_output_file(record)
+        if record['operation_step'] == 'classify':
+            logger.info(f"Record {record_id} indexed")
+            app.add_record_to_output_file(record)
+            message = utils.list_to_ClassifyRequestRecordList([record])
+            task_resend_to_master(message)
+            logger.info(f"Record {record_id} sent to master")
+
     elif success == "record_validated":
-        # message = utils.dict_to_ClassifyResponseRecord(record)
-        # message = utils.dict_to_ClassifyResponseRecord([record])
-        # message = utils.list_to_ClassifyResponseRecordList([record])
         task_message_to_master(record)
-        # logger.info(f"Sent record to master: {record}")
+        logger.info(f"Record {record_id} sent to master")
     else:
-        logger.info("Record failed to be indexed")
+        logger.info(f"Record {record_id} failed to be indexed")
 
 @app.task(queue="update-record")
 def task_message_to_master(message):
@@ -248,15 +269,49 @@ def task_message_to_master(message):
     :return: no return
     """
     if isinstance(message, dict):
-        out_message = utils.list_to_ClassifyResponseRecordList([message])
+        out_message = utils.dict_to_ClassifyResponseRecord(message)
+        logger.debug(f"Forwarding message to Master - Message: {out_message}")
+        app.forward_message(out_message)
     if isinstance(message, list):
-        out_message = utils.list_to_ClassifyResponseRecordList(message)
-    logger.info(f"Forwarding message to Master - Message: {out_message}")
-    # app.forward_message(out_message, pipeline='master')
-    app.forward_message(out_message)
+        for msg in message:
+            out_message = utils.dict_to_ClassifyResponseRecord(msg)
+            logger.debug(f"Forwarding message to Master - Message: {out_message}")
+            app.forward_message(out_message)
 
 # @app.task(queue="classify-record")
-# @app.task(queue="update-record")
+@app.task(queue="update-record")
+def task_resend_to_master(message):
+    """
+    Resend records to master based on bibcode, scix_id or run_id
+    """
+    logger.info(f"Resending records to master")
+
+    request_list = utils.classifyRequestRecordList_to_list(message)
+
+    logger.debug('Request list: {}'.format(request_list))
+    for request in request_list:
+        logger.info('Request: {}'.format(request))
+
+        if 'bibcode' in request:
+            record_id = request['bibcode']
+            record_list = app.query_final_collection_table(bibcode=request['bibcode'])
+        elif 'scix_id' in request:
+            record_list = app.query_final_collection_table(scix_id=request['scix_id'])
+        elif 'run_id' in request:
+            record_list = app.query_final_collection_table(run_id=request['run_id'])
+
+        for record in record_list:
+            record_id = None
+            if 'scix_id' in record:
+                record_id = record['scix_id']
+            if 'bibcode' in record:
+                record_id = record['bibcode']
+            logger.info(f"Sending record {record_id} to master")
+            task_message_to_master(record)
+
+
+# @app.task(queue="classify-record")
+@app.task(queue="update-record")
 def task_update_validated_records(message):
     """
     Update all records that have been validated that have same run_id
@@ -267,15 +322,20 @@ def task_update_validated_records(message):
         }
     """
 
-    logger.info(f"Updating Validated Record from message: {message}")
+    logger.info(f"Updating validated records")
     record = utils.classifyRequestRecordList_to_list(message)[0]
     record_list, success_list = app.update_validated_records(record['run_id'])
     for record, success in zip(record_list, success_list):
+        logger.debug(f"Record: {record}")
+        logger.debug(f"Success: {success}")
         if success == "success":
+            record_id = None
+            if 'scix_id' in record:
+                record_id = record['scix_id']
+            if 'bibcode' in record:
+                record_id = record['bibcode']
+            logger.info(f"Sending record {record_id} to master")
             task_message_to_master(record)
-            # out_message = utils.list_to_ClassifyResponseRecordList(message)
-            # logger.info(f"Forwarding message to Master - Message: {out_message}")
-        # app.forward_message(out_message, pipeline='master')
 
 
 # @app.task(queue="output-results")
@@ -283,10 +343,7 @@ def task_update_validated_records(message):
 @app.task(queue="update-record")
 def task_output_results(message):
     """
-    This worker will forward results to the outside
-    exchange (typically an ADSMasterPipeline) to be
-    incorporated into the storage
-    Also, updates output file with classified record
+    Updates output file with classified record
 
     :param msg: contains the bibcode and the collections:
 
@@ -294,17 +351,13 @@ def task_output_results(message):
              'scix_id': '....',
              'collections': [....]
             }
-    :type: adsmsg.OrcidClaims
     :return: no return
     """
 
     record = utils.message_to_list(message)[0]
-    logger.info('Output results ')
-    logger.info(f'Record being output {message}')
+    logger.debug('Output results ')
+    logger.debug(f'Record being output {message}')
     app.add_record_to_output_file(record)
-    logger.info(f'Record being sent back to Master Pipeline')
-    logger.info(f'Message: {message}')
-    # app.forward_message(output_message)
 
 
 
