@@ -8,7 +8,7 @@ CLASSIFICATION_PRETRAINED_MODEL_REVISION = "SciX-Categorizer"
 CLASSIFICATION_PRETRAINED_MODEL_TOKENIZER = "adsabs/ASTROBERT"
 
 # Celery configuration
-CELERY_INCLUDE = ["Classifierpipeline.tasks"]
+CELERY_INCLUDE = ["ClassifierPipeline.tasks"]
 CELERY_BROKER = "pyamqp://test:test@localhost:5682/classifier_pipeline"
 
 OUTPUT_CELERY_BROKER = "pyamqp://test:test@localhost:5682/master_pipeline" 
