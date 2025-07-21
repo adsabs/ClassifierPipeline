@@ -48,11 +48,11 @@ def get_app_config(key):
     if opath not in sys.path:
         sys.path.insert(0, opath)
 
-    # from ClassifierPipeline.tasks import app
+    from ClassifierPipeline.tasks import app
 
     # print('Getting actual config for', key, app.conf.get(key))
-    # return app.conf.get(key)
-    return os.environ.get(key).strip("'")
+    return app.conf.get(key)
+    # return os.environ.get(key).strip("'")
 
 def run_migrations_online():
     """Run migrations in 'online' mode.
