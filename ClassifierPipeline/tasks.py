@@ -1,12 +1,9 @@
-print('tasks - 00')
 import sys
 import os
 import json
 import adsputils
-print('tasks - 01')
 from adsputils import ADSCelery
 import ClassifierPipeline.app as app_module
-print('tasks - 02')
 import ClassifierPipeline.utilities as utils
 from ClassifierPipeline.classifier import Classifier
 from adsputils import load_config, setup_logging
@@ -74,8 +71,24 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
 
     run_id = app.index_run()
     logger.info('Run ID: {}'.format(run_id))
-    operation_step = 'classify'
-    output_path = os.path.join(proj_home, 'logs', f'{run_id}_classified.tsv')
+
+    request_list = utils.classifyRequestRecordList_to_list(message)
+
+    if 'operation_step' in request_list[0]:
+        operation_step = request_list[0]['operation_step']
+    else:
+        operation_step = config.get('OPERATION_STEP', 'classify_verify')
+
+    if 'output_path' in request_list[0]:
+        try:
+            filename = request_list[0]['output_path']
+            filename = filename.split('/')[-1]
+        except:
+            filename = request_list[0]['output_path']
+    else:
+        filename = ''
+
+    output_path = os.path.join(proj_home, 'logs', f'{filename)_{run_id}_classified.tsv')
 
     utils.prepare_output_file(output_path)
     logger.info('Prepared output file: {}'.format(output_path))
@@ -85,7 +98,6 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
 
     logger.debug("Delay set for queue messages: {}".format(delay_message))
 
-    request_list = utils.classifyRequestRecordList_to_list(message)
 
     logger.debug('Request list: {}'.format(request_list))
     for request in request_list:
@@ -240,7 +252,7 @@ def task_index_classified_record(message):
     if success == "record_indexed":
         if record['operation_step'] == 'classify_verify':
             logger.info(f"Record {record_id} indexed")
-            app.add_record_to_output_file(record)
+            utils.add_record_to_output_file(record)
         if record['operation_step'] == 'classify':
             logger.info(f"Record {record_id} indexed")
             app.add_record_to_output_file(record)

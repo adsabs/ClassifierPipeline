@@ -33,33 +33,6 @@ class SciXClassifierCelery(ADSCelery):
         request_list = parsed_message['classifyRequests']
 
 
-
-    def prepare_output_file(self, output_path, output_format=None):
-        """
-        Prepares an output file
-        """
-
-        header = ['bibcode','scix_id','title','abstract','run_id','categories','scores','collections','collection_scores','earth_science_adjustment','override']
-
-        with open(output_path, 'w', newline='') as file:
-            writer = csv.writer(file, delimiter='\t')
-            writer.writerow(header)
-
-        logger.info(f'Prepared {output_path} for writing.')
-
-
-    def add_record_to_output_file(self, record):
-        """
-        Adds a record to the output file
-        """
-        row = [record['bibcode'], record['scix_id'],record['title'], record['abstract'],record['run_id'], ', '.join(config['ALLOWED_CATEGORIES']), ', '.join(map(str,record['scores'])), ', '.join(record['collections']), ', '.join(map(str, record['collection_scores'])), config['ADDITIONAL_EARTH_SCIENCE_PROCESSING'], '']
-
-        logger.debug(f'Writing {row}')
-        with open(record['output_path'], 'a', newline='') as file:
-            writer = csv.writer(file, delimiter='\t')
-            writer.writerow(row)
-
-
     def index_run(self):
         """
         Indexes a run into a database

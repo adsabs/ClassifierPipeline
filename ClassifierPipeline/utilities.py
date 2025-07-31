@@ -73,12 +73,23 @@ def prepare_output_file(output_path):
     """
     logger.info('Preparing output file - utilities.py')
 
-    header = ['bibcode','scix_id','title','abstract','run_id','categories','scores','collections','collection_scores','earth_science_adjustment','override']
+    header = ['bibcode','scix_id','title','collections','collection_scores','astronomy_score','heliophysics_score','planetary_science_score','earth_science_score','biology_score','physics_score','other_score','garbage_score','override']
 
     with open(output_path, 'w', newline='') as file:
         writer = csv.writer(file, delimiter='\t')
         writer.writerow(header)
     logger.info(f'Prepared {output_path} for writing.')
+
+def add_record_to_output_file(record):
+    """
+    Adds a record to the output file
+    """
+    row = [record['bibcode'], record['scix_id'],record['title'],', '.join(record['collections']), ', '.join(map(str, record['collection_scores'])), round(record['scores'][0],2), round(record['scores'][1],2), round(record['scores'][2],2), round(record['scores'][3],2), round(record['scores'][4],2), round(record['scores'][5],2), round(record['scores'][6],2), round(record['scores'][7],2), '']
+
+    logger.debug(f'Writing {row}')
+    with open(record['output_path'], 'a', newline='') as file:
+        writer = csv.writer(file, delimiter='\t')
+        writer.writerow(row)
 
 
 def check_is_allowed_category(categories_list):
