@@ -44,7 +44,7 @@ def stub_config_and_logger(monkeypatch, tmp_path):
 
 @pytest.fixture
 def U():
-    import utilities as U
+    import ClassifierPipeline.utilities as U
     return U
 
 
@@ -156,7 +156,7 @@ class _ResponseListForOutput:
 
 @pytest.fixture
 def stub_protobuf(monkeypatch):
-    import utilities as U
+    import ClassifierPipeline.utilities as U
 
     # Stub message classes
     monkeypatch.setattr(U, 'ClassifyRequestRecord', object)
@@ -216,7 +216,7 @@ def test_list_to_ClassifyResponseRecordList_builds(stub_protobuf):
 
 
 def test_classifyRequestRecordList_to_list_roundtrip(monkeypatch):
-    import utilities as U
+    import ClassifierPipeline.utilities as U
     class _Req:
         def __init__(self, **kw):
             self.__dict__.update(kw)
@@ -242,7 +242,7 @@ def test_check_identifier_invalid(U):
 
 
 def test_list_to_output_message_semantics(monkeypatch):
-    import utilities as U
+    import ClassifierPipeline.utilities as U
     # Stub ClassifyResponseRecordList to match the function's expectations
     class _Msg:
         def __init__(self):
