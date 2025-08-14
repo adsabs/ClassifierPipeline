@@ -88,7 +88,7 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
     else:
         filename = ''
 
-    output_path = os.path.join(proj_home, 'logs', f'{filename)_{run_id}_classified.tsv')
+    output_path = os.path.join(proj_home, 'logs', f'{filename}_{run_id}_classified.tsv')
 
     utils.prepare_output_file(output_path)
     logger.info('Prepared output file: {}'.format(output_path))

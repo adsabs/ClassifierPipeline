@@ -5,6 +5,7 @@ import zlib
 import csv
 
 import ClassifierPipeline.models as models
+import ClassifierPipeline.utilities as utils
 from adsputils import get_date, ADSCelery, u2asc
 from contextlib import contextmanager
 from sqlalchemy import create_engine, desc, and_, or_
@@ -169,8 +170,11 @@ class SciXClassifierCelery(ADSCelery):
                 # Check for existing override
                 check_overrides_query = session.query(models.OverrideTable).filter(and_(or_(and_(models.OverrideTable.scix_id == record['scix_id'], models.OverrideTable.scix_id != None), and_(models.OverrideTable.bibcode == record['bibcode'], models.OverrideTable.bibcode != None))), models.OverrideTable.override == record['override']).order_by(models.OverrideTable.created.desc()).first()
 
+                allowed = utils.check_is_allowed_category(record['override'])
+                empty = utils.check_if_list_single_empty_string(record['override'])
+
                 logger.debug(f'Check overrides query: {check_overrides_query}')
-                if check_overrides_query is None:
+                if check_overrides_query is None and allowed is True:
                     override_row = models.OverrideTable(bibcode=record['bibcode'],
                                                         scix_id=record['scix_id'],
                                                         override=record['override'])
@@ -191,6 +195,14 @@ class SciXClassifierCelery(ADSCelery):
                     update_final_collection_query.collection = record['override']
                     update_final_collection_query.validated = True
                     session.commit()
+
+                if empty is True:
+                    logger.debug(f'Record to update as validated: {record}')
+                    update_final_collection_query = session.query(models.FinalCollectionTable).filter(and_(or_(and_(models.FinalCollectionTable.scix_id == record['scix_id'], models.FinalCollectionTable.scix_id != None), and_(models.FinalCollectionTable.bibcode == record['bibcode'], models.FinalCollectionTable.bibcode != None))), models.FinalCollectionTable.validated == False).order_by(models.FinalCollectionTable.created.desc()).first()
+
+                    if update_final_collection_query is not None:
+                        update_final_collection_query.validated = True
+                        session.commit()
 
                 return record, "record_validated"
 
