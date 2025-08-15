@@ -249,6 +249,7 @@ def task_index_classified_record(message):
         record_id = record['bibcode']
 
     record, success = app.index_record(record)
+    logger.debug(f'Record: {record}, Success: {success}')
     if success == "record_indexed":
         if record['operation_step'] == 'classify_verify':
             logger.info(f"Record {record_id} indexed")
@@ -261,7 +262,8 @@ def task_index_classified_record(message):
             logger.info(f"Record {record_id} sent to master")
 
     elif success == "record_validated":
-        task_message_to_master(record)
+        message = utils.list_to_ClassifyRequestRecordList([record])
+        task_message_to_master(message)
         logger.info(f"Record {record_id} sent to master")
     else:
         logger.info(f"Record {record_id} failed to be indexed")

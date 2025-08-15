@@ -112,7 +112,7 @@ def check_is_allowed_category(categories_list):
 
     result = [element in allowed for element in categories_list]
 
-    logger.info(f"Cheking allowed categories for (after lowercase) {categories_list}")
+    logger.info(f"Checking allowed categories for (after lowercase) {categories_list}")
     # Only return True if all True
     if sum(result) == len(result):
         return True
