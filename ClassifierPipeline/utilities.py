@@ -246,37 +246,6 @@ def list_to_ClassifyResponseRecordList(input_list):
     return message
 
 
-def list_to_output_message(input_list):
-    """
-    Convert a list of dictionaries to a protobuf message to return to 
-    the Master Pipeline
-
-    """
-
-    message = ClassifyResponseRecordList()
-
-    for item in input_list:
-        entry = message.classify_requests.add()
-        try:
-            entry.bibcode = item.get('bibcode')
-        except:
-            entry.bibcode = None
-        # try:
-        #     entry.scix_id = item.get('scix_id')
-        # except:
-        #     entry.scix_id = None
-        try:
-            entry.status = item.get('status')
-        except:
-            entry.status = None
-        try:
-            entry.status = item.get('collections')
-        except:
-            entry.status = None
-
-    return message
-     
-
 def classifyRequestRecordList_to_list(message):
     """
     Convert a protobuf ClassifyRequestRecordList to a list of dictionaries.
