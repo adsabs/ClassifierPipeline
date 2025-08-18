@@ -195,14 +195,28 @@ class SciXClassifierCelery(ADSCelery):
                     update_final_collection_query.collection = record['override']
                     update_final_collection_query.validated = True
                     session.commit()
+                    success = 'record_validated'
 
-                if empty is True:
+                elif check_overrides_query is None and empty is True:
                     logger.debug(f'Record to update as validated: {record}')
-                    update_final_collection_query = session.query(models.FinalCollectionTable).filter(and_(or_(and_(models.FinalCollectionTable.scix_id == record['scix_id'], models.FinalCollectionTable.scix_id != None), and_(models.FinalCollectionTable.bibcode == record['bibcode'], models.FinalCollectionTable.bibcode != None))), models.FinalCollectionTable.validated == False).order_by(models.FinalCollectionTable.created.desc()).first()
+                    update_final_collection_query_False = session.query(models.FinalCollectionTable).filter(and_(or_(and_(models.FinalCollectionTable.scix_id == record['scix_id'], models.FinalCollectionTable.scix_id != None), and_(models.FinalCollectionTable.bibcode == record['bibcode'], models.FinalCollectionTable.bibcode != None))), models.FinalCollectionTable.validated == False).order_by(models.FinalCollectionTable.created.desc()).first()
+                    update_final_collection_query_True = session.query(models.FinalCollectionTable).filter(and_(or_(and_(models.FinalCollectionTable.scix_id == record['scix_id'], models.FinalCollectionTable.scix_id != None), and_(models.FinalCollectionTable.bibcode == record['bibcode'], models.FinalCollectionTable.bibcode != None))), models.FinalCollectionTable.validated == True).order_by(models.FinalCollectionTable.created.desc()).first()
 
-                    if update_final_collection_query is not None:
-                        update_final_collection_query.validated = True
+                    if update_final_collection_query_False is not None:
+                        update_final_collection_query_False.validated = True
                         session.commit()
+                        success = 'record_validated'
+                    if update_final_collection_query_True is not None:
+                        success = 'record_previously_validated'
+
+                elif check_overrides_query is not None: 
+                    logger.info(f'Record {record} already validated')
+                    success = 'record_previously_validated'
+
+                else:
+                    logger.info(f'Record {record} had other difficulties (re-)validating')
+                    success = 'other_failure'
+
 
                 return record, "record_validated"
 
