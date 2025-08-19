@@ -136,13 +136,6 @@ def prepare_records(records_path, operation_step='validate'):
     print(f'Processing records from: {records_path}')
     print()
 
-
-    # Get run_id from filename
-    run_id = records_path.split('/')[-1]
-    run_id = int(run_id.split('_')[0])
-
-    print(f'Processing run ID: {run_id}')
-
     with open(records_path, 'r') as f:
         csv_reader = csv.reader(f, delimiter='\t')
         headers = next(csv_reader)
@@ -154,33 +147,15 @@ def prepare_records(records_path, operation_step='validate'):
                 record['bibcode'] = row[0]
             elif utils.check_identifier(row[1]) == 'scix_id':
                 record['scix_id'] = row[1]
-            record['title'] = row[2]
-            record['abstract'] = row[3]
-            record['text'] = row[2] + ' ' + row[3]
+            record['run_id'] = row[2]
+            record['title'] = row[3]
             record['operation_step'] = operation_step
-            record['run_id'] = run_id
 
-            record['override'] = row[10].split(',')
-            run_id = row[4]
+            record['override'] = row[14].split(',')
             print(f'validating record: {record}')
             logger.info(f'validating record: {record}')
-            # make a check of proper collections
-            allowed = utils.check_is_allowed_category(record['override'])
-            print(f'Are categories allowed: {allowed}')
-            if allowed:
-                # record = record2_fake_protobuf(record)
-                message = utils.list_to_ClassifyRequestRecordList([record])
-                task_index_classified_record(message)
-
-    # Records that do not need an override
-    # are marked as validated
-
-    run_id_record = {'run_id' : run_id}
-    print('Run ID RECORD')
-    print(run_id_record)
-    logger.info(f'Dictioanry for run id: {run_id_record}')
-    message = utils.list_to_ClassifyRequestRecordList([run_id_record])
-    task_update_validated_records(message)
+            message = utils.list_to_ClassifyRequestRecordList([record])
+            task_index_classified_record(message)
 
 
 

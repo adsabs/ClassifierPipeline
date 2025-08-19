@@ -73,12 +73,23 @@ def prepare_output_file(output_path):
     """
     logger.info('Preparing output file - utilities.py')
 
-    header = ['bibcode','scix_id','title','abstract','run_id','categories','scores','collections','collection_scores','earth_science_adjustment','override']
+    header = ['bibcode','scix_id','run_id','title','collections','collection_scores','astronomy_score','heliophysics_score','planetary_science_score','earth_science_score','biology_score','physics_score','other_score','garbage_score','override']
 
     with open(output_path, 'w', newline='') as file:
         writer = csv.writer(file, delimiter='\t')
         writer.writerow(header)
     logger.info(f'Prepared {output_path} for writing.')
+
+def add_record_to_output_file(record):
+    """
+    Adds a record to the output file
+    """
+    row = [record['bibcode'], record['scix_id'],record['run_id'],record['title'],', '.join(record['collections']), ', '.join(map(str, record['collection_scores'])), round(record['scores'][0],2), round(record['scores'][1],2), round(record['scores'][2],2), round(record['scores'][3],2), round(record['scores'][4],2), round(record['scores'][5],2), round(record['scores'][6],2), round(record['scores'][7],2), '']
+
+    logger.debug(f'Writing {row}')
+    with open(record['output_path'], 'a', newline='') as file:
+        writer = csv.writer(file, delimiter='\t')
+        writer.writerow(row)
 
 
 def check_is_allowed_category(categories_list):
@@ -101,12 +112,28 @@ def check_is_allowed_category(categories_list):
 
     result = [element in allowed for element in categories_list]
 
-    logger.info(f"Cheking allowed categories for (after lowercase) {categories_list}")
+    logger.info(f"Checking allowed categories for (after lowercase) {categories_list}")
     # Only return True if all True
     if sum(result) == len(result):
         return True
     else:
         return False
+
+
+def check_if_list_single_empty_string(input_list):
+    """
+    Check if the input is a list with a single empty string
+
+    Parameters
+    ----------
+    input_list : list (required) List to check if it is a single empty string
+
+    Returns
+    ----------
+    True if input_list is a list with a single empty string, False otherwise
+    """
+
+    return isinstance(input_list, list) and len(input_list) == 1 and input_list[0] == ''
 
 def return_fake_data(record):
     """
@@ -218,37 +245,6 @@ def list_to_ClassifyResponseRecordList(input_list):
     message = ParseDict(response_list_dict, response_message)
     return message
 
-
-def list_to_output_message(input_list):
-    """
-    Convert a list of dictionaries to a protobuf message to return to 
-    the Master Pipeline
-
-    """
-
-    message = ClassifyResponseRecordList()
-
-    for item in input_list:
-        entry = message.classify_requests.add()
-        try:
-            entry.bibcode = item.get('bibcode')
-        except:
-            entry.bibcode = None
-        # try:
-        #     entry.scix_id = item.get('scix_id')
-        # except:
-        #     entry.scix_id = None
-        try:
-            entry.status = item.get('status')
-        except:
-            entry.status = None
-        try:
-            entry.status = item.get('collections')
-        except:
-            entry.status = None
-
-    return message
-     
 
 def classifyRequestRecordList_to_list(message):
     """

@@ -24,7 +24,7 @@ FAKE_DATA = False
 #Data to Skip message from Master Pipeline
 TEST_INPUT_DATA = 'ClassifierPipeline/tests/stub_data/classifier_request.json'
 
-ALLOWED_CATEGORIES = ['Astronomy', 'Heliophysics', 'Planetary Science', 'Earth Science', 'NASA-funded Biophysics', 'Other Physics', 'Other', 'Text Garbage']
+ALLOWED_CATEGORIES = ['astrophysics', 'heliophysics', 'planetary', 'earthscience', 'NASA-funded Biophysics', 'physics', 'general', 'Text Garbage']
 # Thresholds for model checkpoint 32100
 # [Astrophysics, Heliophysics, Planetary Science, Earth Science, Biophysics, Other Physics, Other, Garbage]
 CLASSIFICATION_THRESHOLDS = [0.06, 0.03, 0.04, 0.02, 0.99, 0.02, 0.02, 0.99]
@@ -37,6 +37,7 @@ OTHER_PHYSICS_THRESHOLD_DELTA = 0.02
 OTHER_THRESHOLD_DELTA = 0.02
 GARBAGE_THRESHOLD_DELTA = 0.0
 
+OPERATION_STEP = 'classify_verify'
 # To enable extra processing for Earth Science
 # ADDITIONAL_EARTH_SCIENCE_PROCESSING = 'active'
 # ADDITIONAL_EARTH_SCIENCE_PROCESSING_THRESHOLD = 0.015

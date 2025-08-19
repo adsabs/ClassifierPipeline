@@ -9,11 +9,6 @@ import transformers
 transformers.logging.set_verbosity_debug()
 
 proj_home = os.path.realpath(os.path.join(os.path.dirname(__file__), "../"))
-
-ALLOWED_CATEGORIES = set(['astronomy', 'planetary science', 'heliophysics', 'earth science', 'physics', 'other physics', 'other'])
-
-
-proj_home = os.path.realpath(os.path.join(os.path.dirname(__file__), "../"))
 config = load_config(proj_home=proj_home)
 logger = setup_logging('astrobert_classification.py', proj_home=proj_home,
                         level=config.get('LOGGING_LEVEL', 'INFO'),

@@ -5,6 +5,7 @@ import zlib
 import csv
 
 import ClassifierPipeline.models as models
+import ClassifierPipeline.utilities as utils
 from adsputils import get_date, ADSCelery, u2asc
 from contextlib import contextmanager
 from sqlalchemy import create_engine, desc, and_, or_
@@ -31,33 +32,6 @@ class SciXClassifierCelery(ADSCelery):
 
         parsed_message = json.loads(message)
         request_list = parsed_message['classifyRequests']
-
-
-
-    def prepare_output_file(self, output_path, output_format=None):
-        """
-        Prepares an output file
-        """
-
-        header = ['bibcode','scix_id','title','abstract','run_id','categories','scores','collections','collection_scores','earth_science_adjustment','override']
-
-        with open(output_path, 'w', newline='') as file:
-            writer = csv.writer(file, delimiter='\t')
-            writer.writerow(header)
-
-        logger.info(f'Prepared {output_path} for writing.')
-
-
-    def add_record_to_output_file(self, record):
-        """
-        Adds a record to the output file
-        """
-        row = [record['bibcode'], record['scix_id'],record['title'], record['abstract'],record['run_id'], ', '.join(config['ALLOWED_CATEGORIES']), ', '.join(map(str,record['scores'])), ', '.join(record['collections']), ', '.join(map(str, record['collection_scores'])), config['ADDITIONAL_EARTH_SCIENCE_PROCESSING'], '']
-
-        logger.debug(f'Writing {row}')
-        with open(record['output_path'], 'a', newline='') as file:
-            writer = csv.writer(file, delimiter='\t')
-            writer.writerow(row)
 
 
     def index_run(self):
@@ -196,8 +170,11 @@ class SciXClassifierCelery(ADSCelery):
                 # Check for existing override
                 check_overrides_query = session.query(models.OverrideTable).filter(and_(or_(and_(models.OverrideTable.scix_id == record['scix_id'], models.OverrideTable.scix_id != None), and_(models.OverrideTable.bibcode == record['bibcode'], models.OverrideTable.bibcode != None))), models.OverrideTable.override == record['override']).order_by(models.OverrideTable.created.desc()).first()
 
+                allowed = utils.check_is_allowed_category(record['override'])
+                empty = utils.check_if_list_single_empty_string(record['override'])
+
                 logger.debug(f'Check overrides query: {check_overrides_query}')
-                if check_overrides_query is None:
+                if check_overrides_query is None and allowed is True:
                     override_row = models.OverrideTable(bibcode=record['bibcode'],
                                                         scix_id=record['scix_id'],
                                                         override=record['override'])
@@ -218,6 +195,28 @@ class SciXClassifierCelery(ADSCelery):
                     update_final_collection_query.collection = record['override']
                     update_final_collection_query.validated = True
                     session.commit()
+                    success = 'record_validated'
+
+                elif check_overrides_query is None and empty is True:
+                    logger.debug(f'Record to update as validated: {record}')
+                    update_final_collection_query_False = session.query(models.FinalCollectionTable).filter(and_(or_(and_(models.FinalCollectionTable.scix_id == record['scix_id'], models.FinalCollectionTable.scix_id != None), and_(models.FinalCollectionTable.bibcode == record['bibcode'], models.FinalCollectionTable.bibcode != None))), models.FinalCollectionTable.validated == False).order_by(models.FinalCollectionTable.created.desc()).first()
+                    update_final_collection_query_True = session.query(models.FinalCollectionTable).filter(and_(or_(and_(models.FinalCollectionTable.scix_id == record['scix_id'], models.FinalCollectionTable.scix_id != None), and_(models.FinalCollectionTable.bibcode == record['bibcode'], models.FinalCollectionTable.bibcode != None))), models.FinalCollectionTable.validated == True).order_by(models.FinalCollectionTable.created.desc()).first()
+
+                    if update_final_collection_query_False is not None:
+                        update_final_collection_query_False.validated = True
+                        session.commit()
+                        success = 'record_validated'
+                    if update_final_collection_query_True is not None:
+                        success = 'record_previously_validated'
+
+                elif check_overrides_query is not None: 
+                    logger.info(f'Record {record} already validated')
+                    success = 'record_previously_validated'
+
+                else:
+                    logger.info(f'Record {record} had other difficulties (re-)validating')
+                    success = 'other_failure'
+
 
                 return record, "record_validated"
 
