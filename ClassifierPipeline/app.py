@@ -1,3 +1,26 @@
+"""
+SciX Classifier Celery App
+
+This module defines the `SciXClassifierCelery` class, which extends the `ADSCelery`
+class and facilitates the classification and validation of scientific articles for
+inclusion in specific collections. It interfaces with SQLAlchemy models and a 
+configuration to log, index, validate, and update classification results.
+
+The app uses a predefined set of allowed categories from the config and saves
+classification metadata such as models, scores, overrides, and collections into
+the database. It handles both automatic classification and manual overrides for 
+validation purposes.
+
+Dependencies:
+    - SQLAlchemy ORM for database interaction
+    - adsputils for configuration and logging
+    - ClassifierPipeline.models for ORM models
+    - ClassifierPipeline.utilities for helper utilities
+
+Configuration:
+    - ALLOWED_CATEGORIES: Set of allowed classification categories
+    - CLASSIFICATION_PRETRAINED_MODEL, etc.: Model configuration for classification
+"""
 import os
 import json
 import pickle
@@ -23,23 +46,25 @@ logger = setup_logging('app.py', proj_home=proj_home,
 ALLOWED_CATEGORIES = set(config['ALLOWED_CATEGORIES'])
 
 class SciXClassifierCelery(ADSCelery):
-        
+    """
+    SciXClassifierCelery
 
-    def handle_message_payload(self, message=None, payload=None):
-        """
-        Handles the message payload
-        """
+    Inherits from ADSCelery to handle message ingestion, classification processing,
+    database indexing, and validation of scientific records.
 
-        parsed_message = json.loads(message)
-        request_list = parsed_message['classifyRequests']
-
+    Responsibilities:
+    - Ingest and parse classification requests
+    - Index classification runs and results into the database
+    - Manage model and override tracking
+    - Update validated collections and handle manual overrides
+    """
 
     def index_run(self):
         """
-        Indexes a run into a database
+        Create and persist a new RunTable record in the database.
 
-        :param: none 
-        :return: str Run table row ID
+        Returns:
+            str: The ID of the new run
         """
         with self.session_scope() as session:
 
@@ -54,11 +79,15 @@ class SciXClassifierCelery(ADSCelery):
 
     def index_record(self, record):
         """
-        Saves a record into a database
+        Processes and indexes a classification record into the database.
+        Supports both automated classification and manual overrides.
 
-        :param: record- dictionar
-        :return: boolean - whether record successfuly added
-                to the database
+        Parameters:
+            record (dict): The classification result record to store
+
+        Returns:
+            tuple: (record, status), where status is a string message indicating 
+                   success, failure, or type of update
         """
         logger.debug('Indexing record')
         logger.debug(f'Record: {record}')
@@ -222,14 +251,15 @@ class SciXClassifierCelery(ADSCelery):
 
     def query_final_collection_table(self, run_id=None, bibcode=None, scix_id=None):
         """
-        Query final collections table based on run_id, bibcode, or scix_id
-        
-        param: run_id - integer
-               bibcode - string
-               scix)id - string
+        Queries the FinalCollectionTable based on one of run_id, bibcode, or scix_id.
 
-        return: list of record dictionaries containing bibcode,
-                scix_id, run_id and collections
+        Parameters:
+            run_id (int, optional): ID of the run to query
+            bibcode (str, optional): Bibliographic code to query
+            scix_id (str, optional): SciX ID to query
+
+        Returns:
+            list of dict: List of matched collection records
         """
 
         with self.session_scope() as session:
@@ -276,10 +306,16 @@ class SciXClassifierCelery(ADSCelery):
 
     def update_validated_records(self, run_id):
         """
-        Updates validated records in the database
+        Updates the FinalCollectionTable to mark unvalidated records as validated 
+        for a specific run ID.
 
-        :param: run_id- integer
-        :return: boolean - whether update successful
+        Parameters:
+            run_id (int): ID of the classification run
+
+        Returns:
+            tuple: (record_list, success_list) where:
+                   - record_list is a list of updated records
+                   - success_list is a list of update results
         """
         logger.info(f'Updating run_id: {run_id}')
 
