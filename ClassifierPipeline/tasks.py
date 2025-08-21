@@ -263,10 +263,15 @@ def task_index_classified_record(message):
 
     elif success == "record_validated":
         message = utils.list_to_ClassifyRequestRecordList([record])
-        task_message_to_master(message)
+        task_resend_to_master(message)
         logger.info(f"Record {record_id} sent to master")
     else:
         logger.info(f"Record {record_id} failed to be indexed")
+
+def out_message(message):
+    out_message = utils.dict_to_ClassifyResponseRecord(message)
+    logger.debug(f"Forwarding message to Master - Message: {out_message}")
+    app.forward_message(out_message)
 
 @app.task(queue="update-record")
 def task_message_to_master(message):
@@ -283,14 +288,10 @@ def task_message_to_master(message):
     :return: no return
     """
     if isinstance(message, dict):
-        out_message = utils.dict_to_ClassifyResponseRecord(message)
-        logger.debug(f"Forwarding message to Master - Message: {out_message}")
-        app.forward_message(out_message)
+        out_message(message)
     if isinstance(message, list):
         for msg in message:
-            out_message = utils.dict_to_ClassifyResponseRecord(msg)
-            logger.debug(f"Forwarding message to Master - Message: {out_message}")
-            app.forward_message(out_message)
+            out_message(message)
 
 # @app.task(queue="classify-record")
 @app.task(queue="update-record")
