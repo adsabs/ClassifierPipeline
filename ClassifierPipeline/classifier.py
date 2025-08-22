@@ -1,3 +1,25 @@
+"""
+Classifier Module for SciX Pipeline
+
+This module defines the `Classifier` class that uses a fine-tuned AstroBERT model
+to classify scientific text into predefined SciX categories.
+
+Main Responsibilities:
+    - Tokenize and preprocess input text
+    - Handle long input via sliding window tokenization
+    - Add required special tokens and padding
+    - Perform batched model inference
+    - Aggregate model outputs into category scores and final predictions
+
+Dependencies:
+    - torch
+    - huggingface tokenizer and model via AstroBERTClassification
+    - adsputils for logging and config
+
+Model Assumptions:
+    - A multi-label classification model with sigmoid outputs
+    - Supports long input splitting and score aggregation
+"""
 import os
 from torch import no_grad, tensor
 from adsputils import load_config, setup_logging
@@ -11,6 +33,17 @@ logger = setup_logging('classifier.py', proj_home=proj_home,
                         attach_stdout=config.get('LOG_STDOUT', True))
 
 class Classifier:
+    """
+    Encapsulates logic for SciX category classification using a fine-tuned AstroBERT model.
+
+    Attributes:
+        classifier (AstroBERTClassification): Model wrapper class
+        tokenizer: Huggingface tokenizer instance
+        model: PyTorch model instance
+        labels (list[str]): List of category labels
+        id2label (dict[int, str]): Mapping from index to label
+        label2id (dict[str, int]): Mapping from label to index
+    """
 
     def __init__(self):
         self.classifier = AstroBERTClassification()
@@ -22,11 +55,17 @@ class Classifier:
 
     # split tokenized text into chunks for the model
     def input_ids_splitter(self, input_ids, window_size=510, window_stride=255):
-        '''
-        Given a list of input_ids (tokenized text ready for a model),
-        returns a list with chuncks of window_size, starting and ending with the special tokens (potentially with padding)
-        the chuncks will have overlap by window_size-window_stride
-        '''
+        """
+        Splits a long sequence of token IDs into overlapping chunks.
+
+        Parameters:
+            input_ids (list[int]): Token IDs from tokenizer
+            window_size (int): Max size of each chunk
+            window_stride (int): Overlap between consecutive chunks
+
+        Returns:
+            list[list[int]]: List of split token ID chunks
+        """
             
         # int() rounds towards zero, so down for positive values
         # import pdb; pdb.set_trace()
@@ -39,9 +78,16 @@ class Classifier:
 
 
     def add_special_tokens_split_input_ids(self, split_input_ids, tokenizer):
-        '''
-        adds the start [CLS], end [SEP] and padding [PAD] special tokens to the list of split_input_ids
-        '''
+        """
+        Adds [CLS], [SEP], and [PAD] tokens to split token ID chunks.
+
+        Parameters:
+            split_input_ids (list[list[int]]): Chunks of token IDs
+            tokenizer: Huggingface tokenizer with special token IDs
+
+        Returns:
+            list[list[int]]: Modified chunks with special tokens and padding
+        """
         
         # add start and end
         split_input_ids_with_tokens = [[tokenizer.cls_token_id]+s+[tokenizer.sep_token_id] for s in split_input_ids]
@@ -54,23 +100,21 @@ class Classifier:
 
         
     def batch_score_SciX_categories(self, list_of_texts, score_combiner='max', score_thresholds=None, window_size=510,  window_stride=500):
-        '''
-        Given a list of texts, assigns SciX categories to each of them.
-        Returns two items:
-            a list of categories of the form [[cat_1,cat2], ...] (the predicted categories for each text in the input list, texts can be in multiple categories)
-            a list of detailed scores of the form [(ast_score, hp_score ...) ...] (the predicted scores for each category for each text in the input list). The scores are in order ['Astronomy', 'Heliophysics', 'Planetary Science', 'Earth Science', 'NASA-funded Biophysics', 'Other Physics', 'Other', 'Text Garbage']
+        """
+        Classifies each input text into SciX categories using the model.
 
-        
-        Other than the required list of texts, this functions has a number of optional parameters to modify its behavior.
-        pretrained_model_name_or_path: defaults to 'adsabs/astroBERT', but can replaced with a path to a different finetuned categorizer
-        revision: defaults to 'SCIX-CATEGORIZER' so that huggigface knows which version of astroBERT to download. Probably never needs to be changed.
-        score_combiner: Defaults to 'max'. Can be one of: 'max', 'mean', or a custom lambda function that combines a list of scores per category for each sub-sample into one score for the entire text (this is needed when the text is longer than 512 tokens, the max astroBERT can handle).
-        score_thresholds: list of thresholds that scores in each category need to surpass for that category to be assigned. Defaults are from testing.
-        
-        # splitting params, to handle samples longer than 512 tokens.
-        window_size = 510
-        window_stride = 500    
-        '''
+        Parameters:
+            list_of_texts (list[str]): Raw input text to classify
+            score_combiner (str or function): Method for aggregating scores across chunks ('max', 'mean', or custom function)
+            score_thresholds (list[float]): Threshold per category to include in results
+            window_size (int): Token window size for splitting long inputs
+            window_stride (int): Token stride for overlapping splits
+
+        Returns:
+            tuple:
+                list[list[str]]: Predicted categories per input
+                list[list[float]]: Raw category scores per input
+        """
         
         logger.info(f'Classifying {len(list_of_texts)} records')
         

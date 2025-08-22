@@ -1,3 +1,36 @@
+"""
+Classifier Pipeline Celery Tasks
+
+This module defines Celery tasks for managing and orchestrating the classification
+pipeline for scientific records. It receives messages from ADS Master Pipeline,
+performs classification using a model, updates the database, and sends responses 
+back to the Master Pipeline.
+
+The pipeline includes steps to:
+    - Receive records
+    - Perform classification
+    - Index classification results into a database
+    - Update output files
+    - Validate and forward results to Master Pipeline
+
+Celery Queue:
+    - All tasks are currently assigned to the "update-record" queue. Other queues available include: "classify-record", "index-record", "send-record-to-classifier".
+
+Dependencies:
+    - adsputils
+    - SQLAlchemy for database access
+    - Google protobuf for message formatting
+    - ClassifierPipeline (Classifier, utilities, models)
+
+Tasks:
+    - task_update_record
+    - task_send_input_record_to_classifier
+    - task_index_classified_record
+    - task_message_to_master
+    - task_resend_to_master
+    - task_update_validated_records
+    - task_output_results
+"""
 import sys
 import os
 import json
@@ -39,31 +72,15 @@ classifier = Classifier()
 @app.task(queue="update-record")
 def task_update_record(message,pipeline='classifier', output_format='tsv'):
     """
-    Handle the input from the master
-    All input is a classifyRequestRecordList even for a single record
+    Entry point task to receive classification requests from the master.
 
-    :param message: contains the message inside the packet
-        {
-         'bibcode': String (19 chars),
-         'scix_id': String (19 chars),
-         'title': String,
-         'abstract':String
-        }
-    :return: no return
+    Parses the message, generates initial record metadata, and forwards each 
+    request to the classifier task.
 
-    :passes to queue: message:
-        {
-          'bibcode': String (19 chars),
-          'scix_id': String (19 chars),
-          'title': string,
-          'abstract': string,
-          'text': string,
-          'operation_step': string,
-          'run_id': int,
-          'output_format': string,
-          'override': 
-          'output_path': string
-        }
+    Parameters:
+        message (ClassifyRequestRecordList): List of classification requests
+        pipeline (str): Processing pipeline name (default "classifier")
+        output_format (str): Output format for results (default "tsv")
     """
 
     logger.debug(f'Message type: {type(message)}')
@@ -147,23 +164,12 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
 # @app.task(queue="classify-record")
 def task_send_input_record_to_classifier(message):
     """
-    Send a new record to the classifier
+    Task to perform classification inference on a record.
 
+    If FAKE_DATA is set in config file, generates fake classifications instead of inference.
 
-    :param message: contains the message inside the packet
-        {
-          'bibcode': String (19 chars),
-          'scix_id': String (19 chars),
-          'title': string,
-          'abstract': string,
-          'text': string,
-          'operation_step': string,
-          'run_id': int,
-          'output_format': string,
-          'override': 
-          'output_path': string
-        }
-    :return: no return: passes message packet to queue
+    Parameters:
+        message (ClassifyRequestRecordList): A single-item list with record data
     """
 
     delay_message = config.get('DELAY_MESSAGE', False) 
@@ -212,26 +218,12 @@ def task_send_input_record_to_classifier(message):
 @app.task(queue="update-record")
 def task_index_classified_record(message):
     """
-    Update the database with the new classification
+    Task to store classified records into the database.
 
-    :param message: contains the message inside the packet
-        {
-         'bibcode': String (19 chars),
-         'scix_id': String (19 chars),
-         'collections': [String],
-         'abstract':String,
-         'operation_step': String,
-         'override': String
-          'title': string,
-          'abstract': string,
-          'text': string,
-          'operation_step': string,
-          'run_id': int,
-          'output_format': string,
-          'override': 
-          'output_path': string
-        }
-    :return: no return
+    Also logs the result and forwards it to the master service if appropriate.
+
+    Parameters:
+        message (ClassifyRequestRecordList): Classified record to store
     """
 
     delay_message = config.get('DELAY_MESSAGE', False) 
@@ -263,41 +255,48 @@ def task_index_classified_record(message):
 
     elif success == "record_validated":
         message = utils.list_to_ClassifyRequestRecordList([record])
-        task_message_to_master(message)
+        task_resend_to_master(message)
         logger.info(f"Record {record_id} sent to master")
     else:
         logger.info(f"Record {record_id} failed to be indexed")
 
+def out_message(message):
+    """
+    Helper function to convert and forward a message to the master pipeline.
+
+    Parameters:
+        message (dict): Dictionary containing classification result
+    """
+
+    out_message = utils.dict_to_ClassifyResponseRecord(message)
+    logger.debug(f"Forwarding message to Master - Message: {out_message}")
+    app.forward_message(out_message)
+
 @app.task(queue="update-record")
 def task_message_to_master(message):
     """
-    Return classified record to Master Pipeline.
-    
-    :param message: contains the message inside the packet
-        {
-         'bibcode': String (19 chars),
-         'scix_id': String (19 chars),
-         'collections': [String],
-         'status': int
-        }
-    :return: no return
+    Task to send the classified record(s) back to the master service.
+
+    Parameters:
+        message (dict or list): A single record or list of classified records
     """
+
     if isinstance(message, dict):
-        out_message = utils.dict_to_ClassifyResponseRecord(message)
-        logger.debug(f"Forwarding message to Master - Message: {out_message}")
-        app.forward_message(out_message)
+        out_message(message)
     if isinstance(message, list):
         for msg in message:
-            out_message = utils.dict_to_ClassifyResponseRecord(msg)
-            logger.debug(f"Forwarding message to Master - Message: {out_message}")
-            app.forward_message(out_message)
+            out_message(message)
 
 # @app.task(queue="classify-record")
 @app.task(queue="update-record")
 def task_resend_to_master(message):
     """
-    Resend records to master based on bibcode, scix_id or run_id
+    Task to re-send a classified record to Master Pipeline based on bibcode, scix_id, or run_id.
+
+    Parameters:
+        message (ClassifyRequestRecordList): Message containing one record
     """
+
     logger.info(f"Resending records to master")
 
     request_list = utils.classifyRequestRecordList_to_list(message)
@@ -328,12 +327,10 @@ def task_resend_to_master(message):
 @app.task(queue="update-record")
 def task_update_validated_records(message):
     """
-    Update all records that have been validated that have same run_id
+    Task to mark a batch of records as validated in the database by run_id.
 
-    :param message: contains the message inside the packet
-        {
-         'run_id': Boolean,
-        }
+    Parameters:
+        message (ClassifyRequestRecordList): Message with run_id field
     """
 
     logger.info(f"Updating validated records")
@@ -357,15 +354,10 @@ def task_update_validated_records(message):
 @app.task(queue="update-record")
 def task_output_results(message):
     """
-    Updates output file with classified record
+    Task to append classified record results to the output file.
 
-    :param msg: contains the bibcode and the collections:
-
-            {'bibcode': '....',
-             'scix_id': '....',
-             'collections': [....]
-            }
-    :return: no return
+    Parameters:
+        message (dict): Record containing bibcode, scix_id, and collections
     """
 
     record = utils.message_to_list(message)[0]

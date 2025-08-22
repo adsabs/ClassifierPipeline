@@ -1,3 +1,25 @@
+"""
+AstroBERT Classification Loader
+
+This module sets up a fine-tuned AstroBERT model and tokenizer for multi-label
+classification into SciX scientific categories. It loads a model from Hugging Face
+or local cache using parameters defined in the configuration.
+
+Loaded components are made available via the `AstroBERTClassification` class,
+which stores:
+    - tokenizer
+    - model
+    - labels
+    - id2label and label2id dictionaries
+
+This setup supports classification pipelines that leverage Hugging Face Transformers.
+
+Configuration:
+    - CLASSIFICATION_PRETRAINED_MODEL
+    - CLASSIFICATION_PRETRAINED_MODEL_REVISION
+    - CLASSIFICATION_PRETRAINED_MODEL_TOKENIZER
+    - ALLOWED_CATEGORIES
+"""
 import os
 
 from adsputils import setup_logging, load_config
@@ -33,7 +55,17 @@ model = AutoModelForSequenceClassification.from_pretrained(pretrained_model_name
 logger.info(f'Loaded model: {pretrained_model_name_or_path}, revision: {revision}, tokenizer: {tokenizer_model_name_or_path}')
 
 class AstroBERTClassification():
+    """
+    Static wrapper class that holds model, tokenizer, and label metadata
+    for AstroBERT classification.
 
+    Attributes:
+        model (transformers.PreTrainedModel): Multi-label classification model
+        tokenizer (transformers.PreTrainedTokenizer): Tokenizer for the model
+        labels (list[str]): Allowed SciX category labels
+        id2label (dict[int, str]): Mapping from index to label
+        label2id (dict[str, int]): Mapping from label to index
+    """
     model = model
     tokenizer = tokenizer
     labels = labels
