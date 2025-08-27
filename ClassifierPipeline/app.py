@@ -217,15 +217,6 @@ class SciXClassifierCelery(ADSCelery):
                     logger.info(f'Record {record} had other difficulties (re-)validating')
                     success = 'other_failure'
 
-
-                if empty is True:
-                    logger.debug(f'Record to update as validated: {record}')
-                    update_final_collection_query = session.query(models.FinalCollectionTable).filter(and_(or_(and_(models.FinalCollectionTable.scix_id == record['scix_id'], models.FinalCollectionTable.scix_id != None), and_(models.FinalCollectionTable.bibcode == record['bibcode'], models.FinalCollectionTable.bibcode != None))), models.FinalCollectionTable.validated == False).order_by(models.FinalCollectionTable.created.desc()).first()
-
-                    if update_final_collection_query is not None:
-                        update_final_collection_query.validated = True
-                        session.commit()
-
                 return record, "record_validated"
 
     def query_final_collection_table(self, run_id=None, bibcode=None, scix_id=None):
