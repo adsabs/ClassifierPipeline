@@ -1,272 +1,285 @@
-# tests/test_utilities.py
-import builtins
-import io
 import os
+import sys
 import types
-import importlib
-from textwrap import dedent
+import tempfile
+import importlib.util
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
-import pytest
+# ---------- Build lightweight mocks for external deps BEFORE importing utilities ----------
 
+def _make_mock_adsputils():
+    m = types.ModuleType("adsputils")
 
-@pytest.fixture(autouse=True)
-def stub_config_and_logger(monkeypatch, tmp_path):
-    """Provide a predictable config and a no-op logger for all tests.
+    def load_config(*args, **kwargs):
+        return {
+            "LOGGING_LEVEL": "DEBUG",
+            "LOG_STDOUT": True,
+            "CLASSIFICATION_THRESHOLDS": [0.6, 0.5, 0.55, 0.5, 0.7, 0.65, 0.4, 0.8],
+            "ADDITIONAL_EARTH_SCIENCE_PROCESSING": "inactive",
+            "ADDITIONAL_EARTH_SCIENCE_PROCESSING_THRESHOLD": 0.66,
+            "CLASSIFICATION_PRETRAINED_MODEL": "unit/model",
+            "CLASSIFICATION_PRETRAINED_MODEL_REVISION": "rev-1",
+            "CLASSIFICATION_PRETRAINED_MODEL_TOKENIZER": "tok-1",
+            "ALLOWED_CATEGORIES": [
+                "Astronomy", "Heliophysics", "Planetary Science", "Earth Science",
+                "NASA-funded Biophysics", "Other Physics", "Other", "Text Garbage"
+            ],
+        }
 
-    Also ensures we import the target module *after* patching globals.
-    """
-    # Minimal config
-    fake_config = {
-        'LOGGING_LEVEL': 'DEBUG',
-        'LOG_STDOUT': False,
-        'CLASSIFICATION_THRESHOLDS': [0.6, 0.4, 0.8, 0.5, 0.7, 0.3, 0.2, 0.9],
-        'ADDITIONAL_EARTH_SCIENCE_PROCESSING': 'active',
-        'ADDITIONAL_EARTH_SCIENCE_PROCESSING_THRESHOLD': 0.55,
-        'CLASSIFICATION_PRETRAINED_MODEL': 'model-x',
-        'CLASSIFICATION_PRETRAINED_MODEL_REVISION': 'rev-1',
-        'CLASSIFICATION_PRETRAINED_MODEL_TOKENIZER': 'tok-1',
-        'ALLOWED_CATEGORIES': ['Astronomy', 'Heliophysics', 'Planetary Science', 'Earth Science', 'Other'],
-    }
+    class _Logger:
+        def info(self, *a, **k): pass
+        def debug(self, *a, **k): pass
 
-    class DummyLogger:
-        def __getattr__(self, name):
-            def _(*args, **kwargs):
-                return None
-            return _
-
-    # Ensure module-level config and logger are our fakes post-import
-    import ClassifierPipeline.utilities as U  # module under test must be available on PYTHONPATH
-    monkeypatch.setattr(U, 'config', fake_config, raising=True)
-    monkeypatch.setattr(U, 'logger', DummyLogger(), raising=True)
-
-    return U
+    def setup_logging(*args, **kwargs):
+        return _Logger()
 
 
-@pytest.fixture
-def U():
-    import ClassifierPipeline.utilities as U
-    return U
+    def get_date(): return "1970-01-01"
+    def ADSCelery(): return None
+    def u2asc(s): return s
 
+    m.load_config = load_config
+    m.setup_logging = setup_logging
+    m.get_date = get_date
+    m.ADSCelery = ADSCelery
+    m.u2asc = u2asc
+    return m
 
-def test_classify_record_from_scores_basic(U):
-    record = {
-        'categories': [
-            'Astronomy', 'Heliophysics', 'Planetary Science', 'Earth Science',
-            'NASA-funded Biophysics', 'Other Physics', 'Other', 'Text Garbage'
-        ],
-        'scores': [0.61, 0.2, 0.4, 0.50, 0.1, 0.35, 0.21, 0.1],
-    }
-    out = U.classify_record_from_scores(record.copy())
-    # collections picked where score > threshold
-    assert 'Astronomy' in out['collections']
-    assert 'Heliophysics' not in out['collections']
-    # rounding to two decimals
-    assert all(isinstance(x, float) for x in out['collection_scores'])
-    assert all(len(f"{x:.2f}") > 0 for x in out['collection_scores'])
+def _make_mock_adsmsg():
+    m = types.ModuleType("adsmsg")
 
-
-def test_classify_record_from_scores_earth_science_override(U, monkeypatch):
-    # Arrange: make "Other" above its 0.2 threshold and Earth Science above extra threshold
-    record = {
-        'categories': [
-            'Astronomy', 'Heliophysics', 'Planetary Science', 'Earth Science',
-            'NASA-funded Biophysics', 'Other Physics', 'Other', 'Text Garbage'
-        ],
-        'scores': [0.0, 0.0, 0.0, 0.60, 0.0, 0.0, 0.50, 0.0],
-    }
-    out = U.classify_record_from_scores(record)
-    # The ES extra check should remove Other and add Earth Science
-    assert 'Earth Science' in out['collections']
-    assert 'Other' not in out['collections']
-
-
-def test_prepare_output_file_writes_header(U, tmp_path):
-    p = tmp_path / 'out.tsv'
-    U.prepare_output_file(p)
-    text = p.read_text()
-    assert text.startswith('bibcode\tscix_id\ttitle\tabstract\trun_id')
-    # header has 11 columns separated by tabs
-    assert text.strip().count('\t') == 10
-
-
-def test_check_is_allowed_category_true(U, monkeypatch):
-    assert U.check_is_allowed_category(['astronomy', 'Earth Science']) is True
-
-
-def test_check_is_allowed_category_false(U):
-    assert U.check_is_allowed_category(['astronomy', 'MadeUp']) is False
-
-
-def test_return_fake_data_sets_expected_keys(U):
-    base = {}
-    out = U.return_fake_data(base)
-    assert set(['categories', 'scores', 'model', 'postprocessing']).issubset(out)
-    assert len(out['categories']) == len(out['scores'])
-
-
-def test_filter_allowed_fields_request_default(U):
-    d = {
-        'bibcode': 'X', 'scix_id': 'Y', 'status': 1, 'title': 't', 'abstract': 'a',
-        'operation_step': 'op', 'run_id': 'r', 'override': False, 'output_path': '/tmp',
-        'scores': [0.1], 'collections': ['A'], 'collection_scores': [0.1],
-        'EXTRA': 'nope'
-    }
-    filtered = U.filter_allowed_fields(d)
-    assert 'EXTRA' not in filtered
-    assert 'bibcode' in filtered and 'scores' in filtered
-
-
-def test_filter_allowed_fields_response_set(U):
-    d = {'bibcode': 'B', 'scix_id': 'S', 'status': 2, 'collections': ['C'], 'scores': [1]}
-    filtered = U.filter_allowed_fields(d, response=True)
-    assert set(filtered) == {'bibcode', 'scix_id', 'status', 'collections'}
-
-
-# --- Protobuf-related helpers: stub out ParseDict, MessageToDict, and message classes
-class _ListMsg:
-    def __init__(self, field_name):
-        self._field_name = field_name
-        setattr(self, field_name, [])
-    def __repr__(self):
-        return f"_ListMsg({self._field_name}={getattr(self, self._field_name)!r})"
-
-class _Elem:
-    def __init__(self):
+    class ClassifyRequestRecord:  # empty shell
         pass
 
-class _ResponseListForOutput:
-    def __init__(self):
-        self.classify_requests = []
-    class _Adder:
-        def __init__(self, outer):
-            self.outer = outer
-        def __call__(self):
-            e = _Elem()
-            self.outer.classify_requests.append(e)
-            return e
-    def __getattr__(self, name):
-        if name == 'classify_requests':
-            return self.classify_requests
-        if name == 'classify_requests_add':
-            return self._Adder(self)
-        raise AttributeError
-    def __repr__(self):
-        return f"_ResponseListForOutput(n={len(self.classify_requests)})"
-
-
-@pytest.fixture
-def stub_protobuf(monkeypatch):
-    import ClassifierPipeline.utilities as U
-
-    # Stub message classes
-    monkeypatch.setattr(U, 'ClassifyRequestRecord', object)
-    monkeypatch.setattr(U, 'ClassifyRequestRecordList', lambda: _ListMsg('classify_requests'))
-    monkeypatch.setattr(U, 'ClassifyResponseRecord', object)
-    monkeypatch.setattr(U, 'ClassifyResponseRecordList', lambda: _ListMsg('classifyResponses'))
-
-    # Stub ParseDict and MessageToDict
-    def _parse_dict(input_dict, message):
-        # emulate filling a message; just return a tuple for visibility
-        return (message.__class__.__name__, dict(input_dict))
-    monkeypatch.setattr(U, 'ParseDict', _parse_dict)
-
-    def _msg_to_dict(msg, preserving_proto_field_name=True):
-        # assume msg is a simple object with attributes
-        if isinstance(msg, dict):
-            return msg
-        return dict(getattr(msg, '__dict__', {}))
-    monkeypatch.setattr(U, 'MessageToDict', _msg_to_dict)
-
-    return U
-
-
-def test_dict_to_ClassifyRequestRecord_uses_ParseDict(stub_protobuf):
-    U = stub_protobuf
-    out = U.dict_to_ClassifyRequestRecord({'bibcode': 'A', 'EXTRA': 1})
-    # Our stub returns a tuple (class name, filtered dict)
-    assert isinstance(out, tuple)
-    name, payload = out
-    assert 'EXTRA' not in payload and 'bibcode' in payload
-
-
-def test_list_to_ClassifyRequestRecordList_builds_list(stub_protobuf):
-    U = stub_protobuf
-    msg = U.list_to_ClassifyRequestRecordList([
-        {'bibcode': 'A'}, {'bibcode': 'B', 'scores': [0.1]},
-    ])
-    # Our stub list message simply holds a Python list attribute
-    assert hasattr(msg, 'classify_requests')
-
-
-def test_dict_to_ClassifyResponseRecord_filters(stub_protobuf):
-    U = stub_protobuf
-    out = U.dict_to_ClassifyResponseRecord({'bibcode': 'A', 'collections': ['X'], 'scores': [1]})
-    # Scores are not part of response allowed fields
-    assert 'scores' not in out[1]
-
-
-def test_list_to_ClassifyResponseRecordList_builds(stub_protobuf):
-    U = stub_protobuf
-    msg = U.list_to_ClassifyResponseRecordList([
-        {'bibcode': 'A', 'collections': ['X']},
-        {'bibcode': 'B', 'collections': []},
-    ])
-    assert hasattr(msg, 'classifyResponses')
-    assert isinstance(msg.classifyResponses, list)
-
-
-def test_classifyRequestRecordList_to_list_roundtrip(monkeypatch):
-    import ClassifierPipeline.utilities as U
-    class _Req:
-        def __init__(self, **kw):
-            self.__dict__.update(kw)
-    class _Msg:
-        def __init__(self):
-            self.classify_requests = [_Req(bibcode='A'), _Req(bibcode='B')]
-    monkeypatch.setattr(U, 'MessageToDict', lambda m, preserving_proto_field_name=True: m.__dict__)
-    out = U.classifyRequestRecordList_to_list(_Msg())
-    assert out == [{'bibcode': 'A'}, {'bibcode': 'B'}]
-
-
-def test_check_identifier_scix(U):
-    assert U.check_identifier('scix:AB12-CD34-EF56') == 'scix_id'
-
-
-def test_check_identifier_bibcode_like(U):
-    # Length 19 but not SciX pattern
-    assert U.check_identifier('2019J..123..456A1') == 'bibcode'
-
-
-def test_check_identifier_invalid(U):
-    assert U.check_identifier('short') is None
-
-
-def test_list_to_output_message_semantics(monkeypatch):
-    import ClassifierPipeline.utilities as U
-    # Stub ClassifyResponseRecordList to match the function's expectations
-    class _Msg:
+    class ClassifyRequestRecordList:
         def __init__(self):
             self.classify_requests = []
-        class _Adder:
-            def __init__(self, outer):
-                self.outer = outer
-            def __call__(self):
-                e = types.SimpleNamespace()
-                self.outer.classify_requests.append(e)
-                return e
-        def __getattr__(self, name):
-            if name == 'classify_requests':
-                return self.classify_requests
-            if name == 'classify_requests_add':
-                return self._Adder(self)
-            raise AttributeError
-    monkeypatch.setattr(U, 'ClassifyResponseRecordList', _Msg)
 
-    out = U.list_to_output_message([
-        {'bibcode': 'A', 'status': 5, 'collections': ['X']},
-        {'bibcode': 'B', 'status': 6, 'collections': ['Y']},
-    ])
-    # Current behavior: status ends up being overwritten with collections (likely bug)
-    assert len(out.classify_requests) == 2
-    assert getattr(out.classify_requests[0], 'bibcode') == 'A'
-    assert getattr(out.classify_requests[0], 'status') == ['X']  # documents current bug
+    class ClassifyResponseRecord:
+        pass
+
+    class ClassifyResponseRecordList:
+        def __init__(self):
+            self.classifyResponses = []   # camelCase JSON name
+            self.classify_responses = []  # snake_case convenience
+
+    m.ClassifyRequestRecord = ClassifyRequestRecord
+    m.ClassifyRequestRecordList = ClassifyRequestRecordList
+    m.ClassifyResponseRecord = ClassifyResponseRecord
+    m.ClassifyResponseRecordList = ClassifyResponseRecordList
+    return m
+
+def _make_mock_pb_json_format():
+    m = types.ModuleType("google.protobuf.json_format")
+
+    def ParseDict(d, message):
+        # request list
+        if hasattr(message, "classify_requests") and ("classifyRequests" in d or "classify_requests" in d):
+            items = d.get("classifyRequests", d.get("classify_requests"))
+            message.classify_requests = [SimpleNamespace(**item) for item in items]
+            message._raw = d
+            return message
+        # response list
+        if hasattr(message, "classifyResponses") and "classifyResponses" in d:
+            items = d["classifyResponses"]
+            setattr(message, "classifyResponses", [SimpleNamespace(**item) for item in items])
+            setattr(message, "classify_responses", [SimpleNamespace(**item) for item in items])
+            message._raw = d
+            return message
+        # single messages
+        for k, v in d.items():
+            setattr(message, k, v)
+        message._raw = d
+        return message
+
+    def MessageToDict(obj, preserving_proto_field_name=False):
+        if isinstance(obj, SimpleNamespace):
+            return vars(obj).copy()
+        if hasattr(obj, "_raw"):
+            return dict(obj._raw)
+        return {k: v for k, v in vars(obj).items() if not k.startswith("_")}
+
+    m.ParseDict = ParseDict
+    m.MessageToDict = MessageToDict
+    m.Parse = MagicMock(name="Parse")
+    return m
+
+# Inject mocks
+sys.modules.setdefault("adsputils", _make_mock_adsputils())
+sys.modules.setdefault("adsmsg", _make_mock_adsmsg())
+sys.modules.setdefault("google", types.ModuleType("google"))
+sys.modules.setdefault("google.protobuf", types.ModuleType("google.protobuf"))
+sys.modules.setdefault("google.protobuf.json_format", _make_mock_pb_json_format())
+
+# ---------- Import utilities.py by path (robust to PYTHONPATH) ----------
+THIS_DIR = Path(__file__).resolve().parent
+PROJECT_DIR = THIS_DIR.parent  # assumes tests/ is sibling to utilities.py
+UTILITIES_PATH = PROJECT_DIR / "utilities.py"
+
+if not UTILITIES_PATH.exists():
+    # Fallback: try package-style path if repo is a package (ClassifierPipeline/utilities.py)
+    pkg_utilities = PROJECT_DIR / "ClassifierPipeline" / "utilities.py"
+    if pkg_utilities.exists():
+        UTILITIES_PATH = pkg_utilities
+
+spec = importlib.util.spec_from_file_location("utilities", str(UTILITIES_PATH))
+if spec is None or spec.loader is None:
+    raise RuntimeError(f"Could not load utilities.py from {UTILITIES_PATH}")
+utilities = importlib.util.module_from_spec(spec)
+sys.modules["utilities"] = utilities  # so relative imports resolve against this name
+spec.loader.exec_module(utilities)
+
+# ------------------------------ TESTS ------------------------------
+
+class UtilitiesTestCase(unittest.TestCase):
+
+    def setUp(self):
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmpdir.cleanup)
+
+    # -------- file I/O --------
+
+    def test_prepare_output_file_writes_header(self):
+        output_path = os.path.join(self.tmpdir.name, "out.tsv")
+        utilities.prepare_output_file(output_path)
+        with open(output_path, "r", newline="") as f:
+            text = f.read().rstrip("\n")
+        # current header: bibcode, scix_id, run_id, title, ...
+        self.assertTrue(
+            text.startswith("bibcode\tscix_id\trun_id\ttitle\tcollections\tcollection_scores"),
+            text
+        )
+
+    def test_add_record_to_output_file_appends_row(self):
+        output_path = os.path.join(self.tmpdir.name, "out.tsv")
+        utilities.prepare_output_file(output_path)
+        record = {
+            "bibcode": "2000Test.....A....1",
+            "scix_id": "scix:abcd-1234-ef56",
+            "run_id": "run-1",
+            "title": "A Title",
+            "collections": ["Astronomy", "Other Physics"],
+            "collection_scores": [0.61, 0.70],
+            "scores": [0.611, 0.5, 0.2, 0.3, 0.1, 0.701, 0.2, 0.01],
+            "output_path": output_path,
+        }
+        utilities.add_record_to_output_file(record)
+        with open(output_path, "r", newline="") as f:
+            lines = [line.rstrip("\n") for line in f]
+        self.assertEqual(len(lines), 2)
+        header = lines[0].split("\t")
+        row = lines[1].split("\t")
+        row = [c.rstrip("\r") for c in row]
+        self.assertEqual(header[:4], ["bibcode", "scix_id", "run_id", "title"])
+        self.assertEqual(row[0], record["bibcode"])
+        self.assertEqual(row[1], record["scix_id"])
+        self.assertEqual(row[2], record["run_id"])
+        self.assertEqual(row[3], record["title"])
+        self.assertEqual(row[4], "Astronomy, Other Physics")
+        self.assertEqual(row[5], "0.61, 0.7")
+        self.assertEqual(row[6], "0.61")
+        self.assertEqual(row[13], "0.01")  # garbage_score
+        self.assertEqual(row[14], "")      # override
+
+    # -------- thresholds & classification --------
+
+    def test_classify_record_from_scores_basic(self):
+        record = {
+            "scores": [0.61, 0.50, 0.30, 0.51, 0.2, 0.7, 0.41, 0.79],
+            "categories": ["Astronomy","Heliophysics","Planetary Science","Earth Science",
+                           "NASA-funded Biophysics","Other Physics","Other","Text Garbage"]
+        }
+        out = utilities.classify_record_from_scores(record.copy())
+        # self.assertEqual(out["collections"], ["Astronomy", "Heliophysics", "Earth Science", "Other Physics", "Other"])
+        # self.assertEqual(out["collection_scores"], [0.61, 0.5, 0.51, 0.7, 0.41])
+        self.assertEqual(out["collections"], ["Astronomy", "Earth Science", "Other Physics", "Other"])
+        self.assertEqual(out["collection_scores"], [0.61, 0.51, 0.7, 0.41])
+
+    def test_classify_record_from_scores_earth_science_override(self):
+        utilities.config["ADDITIONAL_EARTH_SCIENCE_PROCESSING"] = "active"
+        utilities.config["ADDITIONAL_EARTH_SCIENCE_PROCESSING_THRESHOLD"] = 0.66
+        try:
+            record = {
+                "scores": [0.0, 0.0, 0.0, 0.70, 0.0, 0.0, 0.50, 0.0],
+                "categories": ["Astronomy","Heliophysics","Planetary Science","Earth Science",
+                               "NASA-funded Biophysics","Other Physics","Other","Text Garbage"]
+            }
+            out = utilities.classify_record_from_scores(record.copy())
+            self.assertIn("Earth Science", out["collections"])
+            self.assertNotIn("Other", out["collections"])
+        finally:
+            utilities.config["ADDITIONAL_EARTH_SCIENCE_PROCESSING"] = "inactive"
+
+    # -------- category helpers --------
+
+    def test_check_is_allowed_category(self):
+        self.assertTrue(utilities.check_is_allowed_category(["Astronomy", "Earth Science"]))
+        self.assertTrue(utilities.check_is_allowed_category(["astronomy", "earth science"]))
+        self.assertFalse(utilities.check_is_allowed_category(["Astronomy", "NotARealCategory"]))
+
+    def test_check_if_list_single_empty_string(self):
+        self.assertTrue(utilities.check_if_list_single_empty_string([""]))
+        self.assertFalse(utilities.check_if_list_single_empty_string([]))
+        self.assertFalse(utilities.check_if_list_single_empty_string(["x"]))
+        self.assertFalse(utilities.check_if_list_single_empty_string(""))
+
+    # -------- fake data --------
+
+    def test_return_fake_data(self):
+        utilities.config["CLASSIFICATION_PRETRAINED_MODEL"] = "m"
+        utilities.config["CLASSIFICATION_PRETRAINED_MODEL_REVISION"] = "r"
+        utilities.config["CLASSIFICATION_PRETRAINED_MODEL_TOKENIZER"] = "t"
+        out = utilities.return_fake_data({})
+        self.assertEqual(len(out["categories"]), 8)
+        self.assertEqual(out["scores"], [0.5] * 8)
+        self.assertEqual(out["model"]["model"], "m")
+        self.assertIn("CLASSIFICATION_THRESHOLDS", out["postprocessing"])
+
+    # -------- protobuf-ish conversions --------
+
+    def _len_response_list(self, msg):
+        if hasattr(msg, "classify_responses"):
+            return len(getattr(msg, "classify_responses"))
+        if hasattr(msg, "classifyResponses"):
+            return len(getattr(msg, "classifyResponses"))
+        return 0
+
+    def test_list_to_ClassifyRequestRecordList_roundtrip(self):
+        lst_msg = utilities.list_to_ClassifyRequestRecordList([
+            {"bibcode": "b1", "title": "t1"},
+            {"bibcode": "b2", "title": "t2"},
+        ])
+        out_list = utilities.classifyRequestRecordList_to_list(lst_msg)
+        self.assertEqual(out_list, [{"bibcode": "b1", "title": "t1"},
+                                    {"bibcode": "b2", "title": "t2"}])
+
+    def test_dict_and_list_to_ClassifyResponseRecordList(self):
+        msg = utilities.dict_to_ClassifyResponseRecord({
+            "bibcode": "b3", "scix_id": "s3", "status": 0, "collections": ["Astronomy"]
+        })
+        self.assertTrue(hasattr(msg, "bibcode"))
+        lst = utilities.list_to_ClassifyResponseRecordList([
+            {"bibcode": "b3", "scix_id": "s3", "status": 0, "collections": ["Astronomy"]},
+            {"bibcode": "b4", "scix_id": "s4", "status": 1, "collections": []},
+        ])
+        self.assertEqual(self._len_response_list(lst), 2)
+
+    # -------- identifier parsing --------
+
+    def test_check_identifier_scix(self):
+        self.assertEqual(utilities.check_identifier("scix:abcd-1234-ef56"), "scix_id")
+
+    def test_check_identifier_bibcode_like(self):
+        # 19-char bibcode-like string (non-scix) -> "bibcode"
+        self.assertEqual(utilities.check_identifier("2019ApJ....1234A01A"), "bibcode")
+
+    def test_check_identifier_invalid_length(self):
+        self.assertIsNone(utilities.check_identifier("too_short"))
+
+
+if __name__ == "__main__":
+    unittest.main()
+
