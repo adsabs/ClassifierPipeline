@@ -246,7 +246,6 @@ class SciXClassifierCelery(ADSCelery):
                     logger.info(f'Record {record} had other difficulties (re-)validating')
                     success = 'other_failure'
 
-
                 return record, "record_validated"
 
     def query_final_collection_table(self, run_id=None, bibcode=None, scix_id=None):

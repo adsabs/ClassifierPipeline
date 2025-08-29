@@ -248,7 +248,7 @@ def task_index_classified_record(message):
             utils.add_record_to_output_file(record)
         if record['operation_step'] == 'classify':
             logger.info(f"Record {record_id} indexed")
-            app.add_record_to_output_file(record)
+            utils.add_record_to_output_file(record)
             message = utils.list_to_ClassifyRequestRecordList([record])
             task_resend_to_master(message)
             logger.info(f"Record {record_id} sent to master")
