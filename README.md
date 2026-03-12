@@ -43,3 +43,28 @@ If calling the classifier from the Master Pipeline:
 python run.py --classify --manual -n path/to/file.csv
 ```
 If called using `--classify` the classifications are indexed immediately.  TO allow a curator inspection of the results before indexing use `--classify_verify`.  
+
+### Benchmarking
+Production-like throughput profiling is available via:
+```
+python -m ClassifierPipeline.benchmark run --dataset ClassifierPipeline/tests/stub_data/stub_new_records.csv --mode real --batch-size 100
+```
+
+Run the default fixed sweep (`batch_sizes=[50,100,250,500]`, `modes=real,fake`):
+```
+python -m ClassifierPipeline.benchmark sweep --dataset ClassifierPipeline/tests/stub_data/stub_new_records.csv
+```
+
+Compare a candidate run against a baseline:
+```
+python -m ClassifierPipeline.benchmark compare --baseline path/to/baseline.json --candidate path/to/candidate.json
+```
+
+Artifacts:
+- Markdown report (human summary)
+- JSON metrics payload (for diffing/comparisons)
+
+Environment flags used by workers for profiling:
+- `PERF_METRICS_ENABLED=true`
+- `PERF_METRICS_PATH=/absolute/path/to/perf_events.jsonl`
+- `PERF_FORCE_FAKE_DATA=true|false` (controls fake/real inference mode per worker process)

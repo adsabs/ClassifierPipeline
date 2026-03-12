@@ -26,9 +26,11 @@ import json
 import pickle
 import zlib
 import csv
+import time
 
 import ClassifierPipeline.models as models
 import ClassifierPipeline.utilities as utils
+import ClassifierPipeline.perf_metrics as perf_metrics
 from adsputils import get_date, ADSCelery, u2asc
 from contextlib import contextmanager
 from sqlalchemy import create_engine, desc, and_, or_
@@ -99,6 +101,8 @@ class SciXClassifierCelery(ADSCelery):
         if 'scix_id' not in record:
             record['scix_id'] = None
 
+        stage_start = time.perf_counter()
+        status = "ok"
         with self.session_scope() as session:
 
             # Initial indexing of automatic classification results
@@ -191,7 +195,17 @@ class SciXClassifierCelery(ADSCelery):
                     check_final_collection_query.final_collection = final_collections
                     session.commit()
 
-                return record, "record_indexed"
+                result = (record, "record_indexed")
+                perf_metrics.emit_event(
+                    stage="index_db",
+                    run_id=record.get("run_id"),
+                    record_id=record.get("scix_id") or record.get("bibcode"),
+                    duration_ms=(time.perf_counter() - stage_start) * 1000.0,
+                    status=status,
+                    extra={"operation_step": record.get("operation_step")},
+                    config=config,
+                )
+                return result
                 
             else:
                 logger.debug('Updating validated record')
@@ -247,7 +261,17 @@ class SciXClassifierCelery(ADSCelery):
                     success = 'other_failure'
 
 
-                return record, "record_validated"
+                result = (record, "record_validated")
+                perf_metrics.emit_event(
+                    stage="index_db",
+                    run_id=record.get("run_id"),
+                    record_id=record.get("scix_id") or record.get("bibcode"),
+                    duration_ms=(time.perf_counter() - stage_start) * 1000.0,
+                    status=status,
+                    extra={"operation_step": record.get("operation_step")},
+                    config=config,
+                )
+                return result
 
     def query_final_collection_table(self, run_id=None, bibcode=None, scix_id=None):
         """
@@ -338,6 +362,5 @@ class SciXClassifierCelery(ADSCelery):
         logger.debug(f'List of validated records: {record_list}')
         return record_list, success_list
  
-
 
 
