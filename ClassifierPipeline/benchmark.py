@@ -197,6 +197,15 @@ def _run_case(
         "completion_elapsed_s": completion["elapsed_s"],
     })
 
+    # If worker-side timing events are missing, still report throughput from the
+    # DB-confirmed completion count and wall-clock duration.
+    wall_clock = ((summary.get("duration_s", {}) or {}).get("wall_clock"))
+    if wall_clock and wall_clock > 0:
+        summary.setdefault("throughput", {})
+        summary["throughput"]["overall_records_per_minute"] = (
+            float(completion["records_indexed"]) / float(wall_clock)
+        ) * 60.0
+
     return summary
 
 
