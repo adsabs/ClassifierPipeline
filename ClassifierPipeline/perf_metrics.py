@@ -6,6 +6,9 @@ multiple Celery worker processes without introducing extra infrastructure.
 
 import json
 import os
+import platform
+import re
+import subprocess
 import time
 from contextlib import contextmanager
 from typing import Any, Dict, Iterable, List, Optional
@@ -158,28 +161,222 @@ def percentile(values: Iterable[float], pct: float) -> Optional[float]:
     return data[lower] * (1.0 - weight) + data[upper] * weight
 
 
-def _duration_stats(values: List[float]) -> Dict[str, Any]:
+def _numeric_stats(values: List[float], include_p99: bool = True) -> Dict[str, Any]:
     if not values:
-        return {
+        output = {
             "count": 0,
             "min": None,
             "max": None,
             "mean": None,
             "p50": None,
             "p95": None,
-            "p99": None,
         }
+        if include_p99:
+            output["p99"] = None
+        return output
 
     total = sum(values)
-    return {
+    output = {
         "count": len(values),
         "min": min(values),
         "max": max(values),
         "mean": total / len(values),
         "p50": percentile(values, 50),
         "p95": percentile(values, 95),
-        "p99": percentile(values, 99),
     }
+    if include_p99:
+        output["p99"] = percentile(values, 99)
+    return output
+
+
+def _duration_stats(values: List[float]) -> Dict[str, Any]:
+    return _numeric_stats(values, include_p99=True)
+
+
+def _read_linux_meminfo(path: str = "/proc/meminfo") -> Optional[Dict[str, float]]:
+    try:
+        values: Dict[str, int] = {}
+        with open(path, "r") as handle:
+            for line in handle:
+                parts = line.split(":")
+                if len(parts) != 2:
+                    continue
+                key = parts[0].strip()
+                match = re.search(r"(\d+)", parts[1])
+                if match:
+                    values[key] = int(match.group(1))
+
+        total_kib = values.get("MemTotal")
+        available_kib = values.get("MemAvailable")
+        if total_kib is None or available_kib is None or total_kib <= 0:
+            return None
+
+        total_bytes = int(total_kib) * 1024
+        available_bytes = int(available_kib) * 1024
+        return {
+            "memory_total_bytes": total_bytes,
+            "memory_available_bytes": available_bytes,
+            "memory_available_ratio": float(available_bytes) / float(total_bytes),
+            "memory_probe": "linux_meminfo",
+        }
+    except Exception:
+        return None
+
+
+def _read_macos_memory() -> Optional[Dict[str, float]]:
+    try:
+        total_proc = subprocess.run(
+            ["sysctl", "-n", "hw.memsize"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if total_proc.returncode != 0:
+            return None
+        total_bytes = int((total_proc.stdout or "").strip())
+        if total_bytes <= 0:
+            return None
+
+        vm_proc = subprocess.run(
+            ["vm_stat"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if vm_proc.returncode != 0:
+            return None
+
+        page_size = 4096
+        page_size_match = re.search(r"page size of (\d+) bytes", vm_proc.stdout or "")
+        if page_size_match:
+            page_size = int(page_size_match.group(1))
+
+        pages: Dict[str, int] = {}
+        for line in (vm_proc.stdout or "").splitlines():
+            match = re.match(r"([^:]+):\s+(\d+)\.", line.strip())
+            if match:
+                pages[match.group(1)] = int(match.group(2))
+
+        available_pages = (
+            pages.get("Pages free", 0)
+            + pages.get("Pages inactive", 0)
+            + pages.get("Pages speculative", 0)
+        )
+        available_bytes = int(available_pages) * int(page_size)
+        return {
+            "memory_total_bytes": int(total_bytes),
+            "memory_available_bytes": available_bytes,
+            "memory_available_ratio": float(available_bytes) / float(total_bytes),
+            "memory_probe": "macos_vm_stat",
+        }
+    except Exception:
+        return None
+
+
+def _host_memory_snapshot() -> Dict[str, Optional[float]]:
+    system = platform.system().lower()
+    if system == "linux":
+        snapshot = _read_linux_meminfo()
+        if snapshot:
+            return snapshot
+        return {
+            "memory_total_bytes": None,
+            "memory_available_bytes": None,
+            "memory_available_ratio": None,
+            "memory_probe": "linux_meminfo_unavailable",
+        }
+    if system == "darwin":
+        snapshot = _read_macos_memory()
+        if snapshot:
+            return snapshot
+        return {
+            "memory_total_bytes": None,
+            "memory_available_bytes": None,
+            "memory_available_ratio": None,
+            "memory_probe": "macos_vm_stat_unavailable",
+        }
+    return {
+        "memory_total_bytes": None,
+        "memory_available_bytes": None,
+        "memory_available_ratio": None,
+        "memory_probe": "unsupported",
+    }
+
+
+def _host_load_snapshot() -> Dict[str, Optional[float]]:
+    cpu_count = os.cpu_count()
+    try:
+        load1, load5, load15 = os.getloadavg()
+    except Exception:
+        load1 = load5 = load15 = None
+
+    def _normalize(value: Optional[float]) -> Optional[float]:
+        if value is None or not cpu_count:
+            return None
+        return float(value) / float(cpu_count)
+
+    return {
+        "platform": platform.system().lower(),
+        "cpu_count": cpu_count,
+        "loadavg_1m": float(load1) if load1 is not None else None,
+        "loadavg_5m": float(load5) if load5 is not None else None,
+        "loadavg_15m": float(load15) if load15 is not None else None,
+        "normalized_load_1m": _normalize(load1),
+        "normalized_load_5m": _normalize(load5),
+        "normalized_load_15m": _normalize(load15),
+    }
+
+
+def collect_system_sample() -> Dict[str, Optional[float]]:
+    sample: Dict[str, Optional[float]] = {"ts": time.time()}
+    sample.update(_host_load_snapshot())
+    sample.update(_host_memory_snapshot())
+    return sample
+
+
+def aggregate_system_samples(samples: List[Dict[str, Any]], enabled: bool = True, sample_interval_s: float = 1.0) -> Dict[str, Any]:
+    platform_name = platform.system().lower()
+    cpu_count = os.cpu_count()
+    memory_probe = "unsupported"
+    if samples:
+        platform_name = str(samples[0].get("platform") or platform_name)
+        cpu_count = samples[0].get("cpu_count")
+        memory_probe = str(samples[0].get("memory_probe") or memory_probe)
+
+    summary: Dict[str, Any] = {}
+    for key in (
+        "normalized_load_1m",
+        "normalized_load_5m",
+        "normalized_load_15m",
+        "memory_available_ratio",
+    ):
+        values = [float(sample[key]) for sample in samples if sample.get(key) is not None]
+        summary[key] = _numeric_stats(values, include_p99=False)
+
+    return {
+        "collection": {
+            "enabled": bool(enabled),
+            "sample_interval_s": float(sample_interval_s),
+            "sample_count": len(samples),
+            "platform": platform_name,
+            "cpu_count": cpu_count,
+            "memory_probe": memory_probe,
+        },
+        "samples": samples,
+        "summary": summary,
+    }
+
+
+def apply_system_load_adjustment(summary: Dict[str, Any]) -> Dict[str, Any]:
+    throughput = summary.setdefault("throughput", {})
+    raw = throughput.get("overall_records_per_minute")
+    mean_load = (
+        (((summary.get("system_load", {}) or {}).get("summary", {}) or {}).get("normalized_load_1m", {}) or {}).get("mean")
+    )
+    factor = max(1.0, float(mean_load)) if mean_load is not None else 1.0
+    throughput["host_load_adjustment_factor"] = factor
+    throughput["load_adjusted_records_per_minute"] = (float(raw) * factor) if raw is not None else None
+    return summary
 
 
 def aggregate_events(
@@ -272,12 +469,17 @@ def evaluate_gate(
 ) -> Dict[str, Any]:
     cand_t = (candidate.get("throughput", {}) or {}).get("overall_records_per_minute")
     base_t = (baseline.get("throughput", {}) or {}).get("overall_records_per_minute")
+    cand_adj_t = (candidate.get("throughput", {}) or {}).get("load_adjusted_records_per_minute")
+    base_adj_t = (baseline.get("throughput", {}) or {}).get("load_adjusted_records_per_minute")
 
     throughput_delta_pct = None
+    load_adjusted_throughput_delta_pct = None
     throughput_pass = False
     if cand_t is not None and base_t not in (None, 0):
         throughput_delta_pct = ((cand_t - base_t) / base_t) * 100.0
         throughput_pass = throughput_delta_pct >= min_throughput_improvement_pct
+    if cand_adj_t is not None and base_adj_t not in (None, 0):
+        load_adjusted_throughput_delta_pct = ((cand_adj_t - base_adj_t) / base_adj_t) * 100.0
 
     p95_deltas: Dict[str, Optional[float]] = {}
     p95_pass = True
@@ -306,10 +508,20 @@ def evaluate_gate(
     if not p95_pass:
         reasons.append("p95 latency regression exceeded threshold")
 
+    base_sys = (baseline.get("system_load", {}) or {}).get("summary", {}) or {}
+    cand_sys = (candidate.get("system_load", {}) or {}).get("summary", {}) or {}
+
     return {
         "pass": gate_pass,
         "throughput_delta_pct": throughput_delta_pct,
+        "load_adjusted_throughput_delta_pct": load_adjusted_throughput_delta_pct,
         "p95_delta_pct_by_stage": p95_deltas,
+        "system_load_delta": {
+            "baseline_mean_normalized_load_1m": ((base_sys.get("normalized_load_1m") or {}).get("mean")),
+            "candidate_mean_normalized_load_1m": ((cand_sys.get("normalized_load_1m") or {}).get("mean")),
+            "baseline_mean_memory_available_ratio": ((base_sys.get("memory_available_ratio") or {}).get("mean")),
+            "candidate_mean_memory_available_ratio": ((cand_sys.get("memory_available_ratio") or {}).get("mean")),
+        },
         "reasons": reasons,
         "thresholds": {
             "min_throughput_improvement_pct": min_throughput_improvement_pct,
@@ -335,8 +547,14 @@ def _fmt(value: Optional[float], places: int = 2) -> str:
 def render_markdown(summary: Dict[str, Any], output_path: str) -> None:
     latency = summary.get("latency_ms", {}) or {}
     counts = summary.get("counts", {}) or {}
-    throughput = (summary.get("throughput", {}) or {}).get("overall_records_per_minute")
+    throughput_info = summary.get("throughput", {}) or {}
+    throughput = throughput_info.get("overall_records_per_minute")
+    load_adjusted_throughput = throughput_info.get("load_adjusted_records_per_minute")
+    load_adjustment_factor = throughput_info.get("host_load_adjustment_factor")
     duration = (summary.get("duration_s", {}) or {}).get("wall_clock")
+    system_load = summary.get("system_load", {}) or {}
+    system_load_collection = system_load.get("collection", {}) or {}
+    system_load_summary = system_load.get("summary", {}) or {}
     gate = summary.get("gate", {}) or {}
 
     lines = [
@@ -356,6 +574,8 @@ def render_markdown(summary: Dict[str, Any], output_path: str) -> None:
         "",
         f"- **Status**: `{summary.get('status', 'unknown')}`",
         f"- **Throughput**: `{_fmt(throughput)} records/min`",
+        f"- **Load-Adjusted Throughput**: `{_fmt(load_adjusted_throughput)} records/min`",
+        f"- **Host Load Adjustment Factor**: `{_fmt(load_adjustment_factor)}`",
         f"- **Wall Duration**: `{_fmt(duration)} s`",
         f"- **Submitted**: `{counts.get('records_submitted', 0)}`",
         f"- **Indexed**: `{counts.get('records_indexed', 0)}`",
@@ -397,6 +617,18 @@ def render_markdown(summary: Dict[str, Any], output_path: str) -> None:
         "",
         f"- Highest p95 stage: `{slowest_stage or 'n/a'}` ({_fmt(slowest_p95)} ms)",
         "",
+        "## System Load",
+        "",
+        f"- **Sample Count**: `{system_load_collection.get('sample_count', 0)}`",
+        f"- **Sample Interval**: `{_fmt(system_load_collection.get('sample_interval_s'))} s`",
+        f"- **Platform**: `{system_load_collection.get('platform', 'n/a')}`",
+        f"- **Memory Probe**: `{system_load_collection.get('memory_probe', 'n/a')}`",
+        f"- **Normalized Load (1m) Mean**: `{_fmt(((system_load_summary.get('normalized_load_1m') or {}).get('mean')))}`",
+        f"- **Normalized Load (1m) p95**: `{_fmt(((system_load_summary.get('normalized_load_1m') or {}).get('p95')))}`",
+        f"- **Normalized Load (5m) Mean**: `{_fmt(((system_load_summary.get('normalized_load_5m') or {}).get('mean')))}`",
+        f"- **Memory Available Ratio Mean**: `{_fmt(((system_load_summary.get('memory_available_ratio') or {}).get('mean')))}`",
+        f"- **Memory Available Ratio Min**: `{_fmt(((system_load_summary.get('memory_available_ratio') or {}).get('min')))}`",
+        "",
         "## Gate",
         "",
     ])
@@ -404,6 +636,7 @@ def render_markdown(summary: Dict[str, Any], output_path: str) -> None:
     if gate:
         lines.append(f"- **Pass**: `{gate.get('pass')}`")
         lines.append(f"- **Throughput Delta %**: `{_fmt(gate.get('throughput_delta_pct'))}`")
+        lines.append(f"- **Load-Adjusted Throughput Delta %**: `{_fmt(gate.get('load_adjusted_throughput_delta_pct'))}`")
         reasons = gate.get("reasons", []) or ["none"]
         lines.append(f"- **Reasons**: {', '.join(reasons)}")
     else:

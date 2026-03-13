@@ -11,6 +11,7 @@ import csv
 import json
 import os
 import subprocess
+import threading
 import time
 from datetime import datetime, timezone
 from typing import Dict, Iterable, List, Optional
@@ -130,6 +131,8 @@ def _run_case(
     events_path: str,
     worker_profile: Optional[str] = None,
     queue_names: Optional[str] = None,
+    system_sample_interval_s: float = 1.0,
+    system_load_enabled: bool = True,
 ) -> Dict[str, object]:
     import ClassifierPipeline.tasks as tasks
     import ClassifierPipeline.utilities as utils
@@ -145,27 +148,46 @@ def _run_case(
 
     run_id = tasks.app.index_run()
     submitted = 0
+    system_samples: List[Dict[str, object]] = []
+    sampler_stop = threading.Event()
+
+    def _sample_loop() -> None:
+        while not sampler_stop.wait(system_sample_interval_s):
+            system_samples.append(perf_metrics.collect_system_sample())
+
+    sampler_thread = None
+    if system_load_enabled:
+        system_samples.append(perf_metrics.collect_system_sample())
+        sampler_thread = threading.Thread(target=_sample_loop, daemon=True)
+        sampler_thread.start()
 
     start_wall = time.time()
-    for chunk in _chunks(records, batch_size):
-        payload = []
-        for record in chunk:
-            item = dict(record)
-            item["run_id"] = run_id
-            item["operation_step"] = operation_step
-            payload.append(item)
+    try:
+        for chunk in _chunks(records, batch_size):
+            payload = []
+            for record in chunk:
+                item = dict(record)
+                item["run_id"] = run_id
+                item["operation_step"] = operation_step
+                payload.append(item)
 
-        message = utils.list_to_ClassifyRequestRecordList(payload)
-        tasks.task_update_record.delay(message)
-        submitted += len(payload)
+            message = utils.list_to_ClassifyRequestRecordList(payload)
+            tasks.task_update_record.delay(message)
+            submitted += len(payload)
 
-    completion = _poll_run_completion(
-        run_id=run_id,
-        expected_records=submitted,
-        timeout_s=timeout_s,
-        poll_interval_s=poll_interval_s,
-    )
-    end_wall = time.time()
+        completion = _poll_run_completion(
+            run_id=run_id,
+            expected_records=submitted,
+            timeout_s=timeout_s,
+            poll_interval_s=poll_interval_s,
+        )
+        end_wall = time.time()
+    finally:
+        if system_load_enabled:
+            sampler_stop.set()
+            if sampler_thread is not None:
+                sampler_thread.join(timeout=max(0.1, system_sample_interval_s))
+            system_samples.append(perf_metrics.collect_system_sample())
 
     events = perf_metrics.load_events(events_path, run_id=run_id)
     summary = perf_metrics.aggregate_events(
@@ -206,6 +228,13 @@ def _run_case(
             float(completion["records_indexed"]) / float(wall_clock)
         ) * 60.0
 
+    summary["system_load"] = perf_metrics.aggregate_system_samples(
+        system_samples if system_load_enabled else [],
+        enabled=system_load_enabled,
+        sample_interval_s=system_sample_interval_s,
+    )
+    perf_metrics.apply_system_load_adjustment(summary)
+
     return summary
 
 
@@ -233,6 +262,10 @@ def cmd_run(args) -> int:
     config = load_config(proj_home=os.path.realpath(os.path.join(os.path.dirname(__file__), "../")))
     output_dir = args.output_dir or config.get("PERF_METRICS_OUTPUT_DIR", os.path.join("logs", "benchmarks"))
     events_path = args.events_path or os.path.join(output_dir, "perf_events.jsonl")
+    system_sample_interval_s = float(getattr(args, "system_sample_interval", config.get("PERF_SYSTEM_SAMPLE_INTERVAL_S", 1.0)))
+    system_load_enabled = not bool(getattr(args, "disable_system_load", False))
+    if "PERF_SYSTEM_LOAD_ENABLED" in config:
+        system_load_enabled = system_load_enabled and perf_metrics._as_bool(config.get("PERF_SYSTEM_LOAD_ENABLED"))
 
     summary = _run_case(
         records_path=args.dataset,
@@ -244,6 +277,8 @@ def cmd_run(args) -> int:
         events_path=events_path,
         worker_profile=args.worker_profile,
         queue_names=args.queue_names,
+        system_sample_interval_s=system_sample_interval_s,
+        system_load_enabled=system_load_enabled,
     )
 
     if args.baseline:
@@ -259,6 +294,7 @@ def cmd_run(args) -> int:
     print(json.dumps({
         "status": summary.get("status"),
         "throughput": (summary.get("throughput", {}) or {}).get("overall_records_per_minute"),
+        "load_adjusted_throughput": (summary.get("throughput", {}) or {}).get("load_adjusted_records_per_minute"),
         "json": artifacts["json"],
         "markdown": artifacts["markdown"],
         "gate": summary.get("gate"),
@@ -295,6 +331,12 @@ def cmd_sweep(args) -> int:
     timeout_s = args.timeout if args.timeout is not None else sweep_config.get("timeout", 900)
     poll_interval_s = args.poll_interval if args.poll_interval is not None else sweep_config.get("poll_interval", 2.0)
     operation_step = args.operation_step or sweep_config.get("operation_step", "classify_verify")
+    system_sample_interval_s = float(getattr(args, "system_sample_interval", sweep_config.get("system_sample_interval", config.get("PERF_SYSTEM_SAMPLE_INTERVAL_S", 1.0))))
+    system_load_enabled = not bool(getattr(args, "disable_system_load", False))
+    if "system_load_enabled" in sweep_config:
+        system_load_enabled = system_load_enabled and perf_metrics._as_bool(sweep_config.get("system_load_enabled"))
+    elif "PERF_SYSTEM_LOAD_ENABLED" in config:
+        system_load_enabled = system_load_enabled and perf_metrics._as_bool(config.get("PERF_SYSTEM_LOAD_ENABLED"))
 
     events_path = args.events_path or os.path.join(output_dir, "perf_events.jsonl")
 
@@ -311,6 +353,8 @@ def cmd_sweep(args) -> int:
                 "events_path": events_path,
                 "worker_profile": args.worker_profile,
                 "queue_names": args.queue_names,
+                "system_sample_interval_s": system_sample_interval_s,
+                "system_load_enabled": system_load_enabled,
             }
 
             if args.warmup:
@@ -318,11 +362,15 @@ def cmd_sweep(args) -> int:
 
             summary = _run_case(**case_args)
             artifacts = _write_run_artifacts(summary, output_dir=output_dir, prefix="benchmark_case")
+            system_load_summary = ((summary.get("system_load", {}) or {}).get("summary", {}) or {})
             results.append({
                 "mode": mode,
                 "batch_size": batch_size,
                 "status": summary.get("status"),
                 "throughput": (summary.get("throughput", {}) or {}).get("overall_records_per_minute"),
+                "load_adjusted_throughput": (summary.get("throughput", {}) or {}).get("load_adjusted_records_per_minute"),
+                "mean_normalized_load_1m": ((system_load_summary.get("normalized_load_1m", {}) or {}).get("mean")),
+                "mean_memory_available_ratio": ((system_load_summary.get("memory_available_ratio", {}) or {}).get("mean")),
                 "json": artifacts["json"],
                 "markdown": artifacts["markdown"],
             })
@@ -335,6 +383,8 @@ def cmd_sweep(args) -> int:
             "timeout_s": timeout_s,
             "poll_interval_s": poll_interval_s,
             "operation_step": operation_step,
+            "system_sample_interval_s": system_sample_interval_s,
+            "system_load_enabled": system_load_enabled,
             "warmup": bool(args.warmup),
             "worker_profile": args.worker_profile,
             "queue_names": args.queue_names,
@@ -396,6 +446,8 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--worker-profile", default="")
     run_parser.add_argument("--queue-names", default="")
     run_parser.add_argument("--baseline", default=None)
+    run_parser.add_argument("--system-sample-interval", type=float, default=float(config.get("PERF_SYSTEM_SAMPLE_INTERVAL_S", 1.0)))
+    run_parser.add_argument("--disable-system-load", action="store_true", default=False)
     run_parser.add_argument("--p95-regression-limit-pct", type=float, default=default_p95_reg)
     run_parser.add_argument("--min-throughput-improvement-pct", type=float, default=default_tp_impr)
     run_parser.set_defaults(func=cmd_run)
@@ -412,6 +464,8 @@ def build_parser() -> argparse.ArgumentParser:
     sweep_parser.add_argument("--output-dir", default=None)
     sweep_parser.add_argument("--worker-profile", default="")
     sweep_parser.add_argument("--queue-names", default="")
+    sweep_parser.add_argument("--system-sample-interval", type=float, default=float(config.get("PERF_SYSTEM_SAMPLE_INTERVAL_S", 1.0)))
+    sweep_parser.add_argument("--disable-system-load", action="store_true", default=False)
     sweep_parser.add_argument("--warmup", action="store_true", default=True)
     sweep_parser.add_argument("--no-warmup", dest="warmup", action="store_false")
     sweep_parser.set_defaults(func=cmd_sweep)

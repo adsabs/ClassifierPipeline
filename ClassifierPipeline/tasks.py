@@ -63,8 +63,9 @@ logger = setup_logging('tasks.py', proj_home=proj_home,
 
 app.conf.CELERY_QUEUES = (
     Queue("update-record", app.exchange, routing_key="update-record"),
-    # Queue("classify-record", app.exchange, routing_key="classify-record"),
-    # Queue("classify-record", app.exchange, routing_key="index-record")
+    Queue("classify-record", app.exchange, routing_key="classify-record"),
+    Queue("classify-record", app.exchange, routing_key="index-record"),
+    Queue("send-record-to-master", app.exchange, routing_key="send-record-to-master")
 )
 
 classifier = Classifier()
@@ -183,8 +184,8 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
             
 
 # @app.task(queue="unclassified-queue")
-@app.task(queue="update-record")
-# @app.task(queue="classify-record")
+# @app.task(queue="update-record")
+@app.task(queue="classify-record")
 def task_send_input_record_to_classifier(message):
     """
     Task to perform classification inference on a record.
@@ -260,7 +261,7 @@ def task_send_input_record_to_classifier(message):
 
 
 # @app.task(queue="classify-record")
-@app.task(queue="update-record")
+@app.task(queue="index-record")
 def task_index_classified_record(message):
     """
     Task to store classified records into the database.
@@ -333,7 +334,7 @@ def out_message(message):
     logger.debug(f"Forwarding message to Master - Message: {out_message}")
     app.forward_message(out_message)
 
-@app.task(queue="update-record")
+@app.task(queue="send-record-to-master")
 def task_message_to_master(message):
     """
     Task to send the classified record(s) back to the master service.
@@ -379,7 +380,7 @@ def task_message_to_master(message):
                 )
 
 # @app.task(queue="classify-record")
-@app.task(queue="update-record")
+@app.task(queue="send-record-to-master")
 def task_resend_to_master(message):
     """
     Task to re-send a classified record to Master Pipeline based on bibcode, scix_id, or run_id.
@@ -415,7 +416,7 @@ def task_resend_to_master(message):
 
 
 # @app.task(queue="classify-record")
-@app.task(queue="update-record")
+@app.task(queue="index-record")
 def task_update_validated_records(message):
     """
     Task to mark a batch of records as validated in the database by run_id.
