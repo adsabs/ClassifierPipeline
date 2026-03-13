@@ -319,12 +319,19 @@ def task_index_classified_record(message):
     records = utils.classifyRequestRecordList_to_list(message)
     logger.debug(f"Record batch: {records}")
     logger.debug(f'Record type: {type(message)}')
-    for record in records:
+    touched_output_paths = set()
+    results = []
+    if records and all(record.get("operation_step") in {"classify", "classify_verify"} for record in records):
+        results = app.index_records_batch(records)
+    else:
+        for record in records:
+            results.append(app.index_record(record))
+
+    for record, success in results:
         record_id = _record_identifier(record)
 
         stage_start = time.perf_counter()
         try:
-            record, success = app.index_record(record)
             index_status = "ok"
         except Exception:
             index_status = "error"
@@ -344,9 +351,13 @@ def task_index_classified_record(message):
             if record['operation_step'] == 'classify_verify':
                 logger.info(f"Record {record_id} indexed")
                 utils.add_record_to_output_file(record)
+                if record.get("output_path"):
+                    touched_output_paths.add(record["output_path"])
             if record['operation_step'] == 'classify':
                 logger.info(f"Record {record_id} indexed")
                 app.add_record_to_output_file(record)
+                if record.get("output_path"):
+                    touched_output_paths.add(record["output_path"])
                 resend_message = utils.list_to_ClassifyRequestRecordList([record])
                 task_resend_to_master(resend_message)
                 logger.info(f"Record {record_id} sent to master")
@@ -357,6 +368,9 @@ def task_index_classified_record(message):
             logger.info(f"Record {record_id} sent to master")
         else:
             logger.info(f"Record {record_id} failed to be indexed")
+
+    for output_path in touched_output_paths:
+        utils.flush_output_file(output_path)
 
 def out_message(message):
     """

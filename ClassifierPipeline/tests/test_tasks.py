@@ -17,6 +17,7 @@ def _import_tasks_module(monkeypatch, base_fake_config, dummy_logger):
         conf=types.SimpleNamespace(CELERY_QUEUES=()),
         index_run=lambda: "RUNID",
         index_record=lambda record: (record, "record_indexed"),
+        index_records_batch=lambda records: [(record, "record_indexed") for record in records],
         add_record_to_output_file=lambda record: None,
         query_final_collection_table=lambda **kwargs: [],
         update_validated_records=lambda run_id: ([], []),
@@ -38,6 +39,7 @@ def _import_tasks_module(monkeypatch, base_fake_config, dummy_logger):
     fake_utils.classify_record_from_scores = lambda record: record
     fake_utils.return_fake_data = lambda record: {**record, "categories": ["fake"], "scores": [1.0]}
     fake_utils.add_record_to_output_file = lambda record: None
+    fake_utils.flush_output_file = lambda output_path=None: None
     fake_utils.dict_to_ClassifyResponseRecord = lambda message: {"wrapped": message}
 
     class FakeClassifier:
@@ -315,7 +317,7 @@ def test_task_index_classified_record_processes_all_records_in_batch(monkeypatch
     module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
     module.utils.classifyRequestRecordList_to_list = lambda message: [dict(item) for item in message]
     indexed = []
-    module.app.index_record = lambda record: (indexed.append(record["bibcode"]) or (record, "record_indexed"))
+    module.app.index_records_batch = lambda records: [(indexed.append(record["bibcode"]) or (record, "record_indexed")) for record in records]
     module.perf_metrics.emit_event = lambda **kwargs: None
     module.utils.add_record_to_output_file = lambda record: None
     module.task_index_classified_record(
@@ -344,7 +346,7 @@ def test_task_index_classified_record_classify_path(monkeypatch, base_fake_confi
 def test_task_index_classified_record_classify_batch_path(monkeypatch, base_fake_config, dummy_logger):
     module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
     module.utils.classifyRequestRecordList_to_list = lambda message: [dict(item) for item in message]
-    module.app.index_record = lambda record: (record, "record_indexed")
+    module.app.index_records_batch = lambda records: [(record, "record_indexed") for record in records]
     module.perf_metrics.emit_event = lambda **kwargs: None
     app_calls = []
     resend_calls = []
@@ -359,6 +361,41 @@ def test_task_index_classified_record_classify_batch_path(monkeypatch, base_fake
     )
     assert app_calls == ["B1", "B2"]
     assert resend_calls == ["B1", "B2"]
+
+
+def test_task_index_classified_record_flushes_touched_output_paths_once_per_batch(monkeypatch, base_fake_config, dummy_logger):
+    module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
+    module.utils.classifyRequestRecordList_to_list = lambda message: [dict(item) for item in message]
+    module.app.index_records_batch = lambda records: [(record, "record_indexed") for record in records]
+    module.perf_metrics.emit_event = lambda **kwargs: None
+    flushed = []
+    module.utils.add_record_to_output_file = lambda record: None
+    module.utils.flush_output_file = lambda output_path=None: flushed.append(output_path)
+    module.task_index_classified_record(
+        [
+            {"bibcode": "B1", "operation_step": "classify_verify", "run_id": "R", "output_path": "out.tsv"},
+            {"bibcode": "B2", "operation_step": "classify_verify", "run_id": "R", "output_path": "out.tsv"},
+        ]
+    )
+    assert flushed == ["out.tsv"]
+
+
+def test_task_index_classified_record_falls_back_to_per_record_for_validation_batch(monkeypatch, base_fake_config, dummy_logger):
+    module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
+    module.utils.classifyRequestRecordList_to_list = lambda message: [dict(item) for item in message]
+    indexed = []
+    module.app.index_record = lambda record: (indexed.append(record["bibcode"]) or (record, "record_validated"))
+    module.app.index_records_batch = lambda records: (_ for _ in ()).throw(AssertionError("should not batch validation"))
+    module.perf_metrics.emit_event = lambda **kwargs: None
+    module.utils.list_to_ClassifyRequestRecordList = lambda payload: payload
+    module.task_resend_to_master = lambda message: None
+    module.task_index_classified_record(
+        [
+            {"bibcode": "B1", "operation_step": "validate", "run_id": "R"},
+            {"bibcode": "B2", "operation_step": "validate", "run_id": "R"},
+        ]
+    )
+    assert indexed == ["B1", "B2"]
 
 
 def test_task_index_classified_record_validated_path(monkeypatch, base_fake_config, dummy_logger):

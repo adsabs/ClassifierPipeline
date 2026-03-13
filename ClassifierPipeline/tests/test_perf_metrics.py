@@ -52,6 +52,16 @@ def test_aggregate_events_records_classify_batch_latency_and_sizes():
     assert summary["batch_sizes"]["classify"]["p95"] == 4.0
 
 
+def test_aggregate_events_normalizes_batched_index_db_latency():
+    events = [
+        {"ts": 1.0, "stage": "index_db", "duration_ms": 100.0, "status": "ok", "extra": {"record_count": 10, "batch_mode": True}},
+    ]
+    summary = perf_metrics.aggregate_events(events)
+    assert summary["latency_ms"]["index_db"]["p95"] == 10.0
+    assert summary["batch_latency_ms"]["index_db"]["p95"] == 100.0
+    assert summary["batch_sizes"]["index_db"]["p95"] == 10.0
+
+
 def test_evaluate_gate_pass_and_fail():
     baseline = {
         "throughput": {"overall_records_per_minute": 100.0, "load_adjusted_records_per_minute": 105.0},
@@ -167,8 +177,8 @@ def test_render_markdown_includes_system_load(tmp_path):
         "duration_s": {"wall_clock": 10.0},
         "counts": {"records_submitted": 10, "records_indexed": 10, "records_forwarded": 10, "failures": 0},
         "latency_ms": {},
-        "batch_latency_ms": {"classify": {"mean": 25.0, "p95": 40.0}},
-        "batch_sizes": {"classify": {"mean": 100.0, "p95": 120.0}},
+        "batch_latency_ms": {"classify": {"mean": 25.0, "p95": 40.0}, "index_db": {"mean": 35.0, "p95": 50.0}},
+        "batch_sizes": {"classify": {"mean": 100.0, "p95": 120.0}, "index_db": {"mean": 90.0, "p95": 110.0}},
         "system_load": {
             "collection": {"sample_count": 3, "sample_interval_s": 1.0, "platform": "linux", "memory_probe": "linux_meminfo"},
             "summary": {

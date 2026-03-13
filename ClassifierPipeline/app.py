@@ -115,6 +115,203 @@ class SciXClassifierCelery(ADSCelery):
     def add_record_to_output_file(self, record):
         utils.add_record_to_output_file(record)
 
+    def _record_key(self, record):
+        if record.get("scix_id"):
+            return ("scix_id", record.get("scix_id"))
+        return ("bibcode", record.get("bibcode"))
+
+    def _prefetch_overrides(self, session, records):
+        bibcodes = {record.get("bibcode") for record in records if record.get("bibcode")}
+        scix_ids = {record.get("scix_id") for record in records if record.get("scix_id")}
+        if not bibcodes and not scix_ids:
+            return {"bibcode": {}, "scix_id": {}}
+
+        override_rows = session.query(models.OverrideTable).filter(
+            or_(
+                and_(models.OverrideTable.scix_id.in_(list(scix_ids)) if scix_ids else False, models.OverrideTable.scix_id != None),
+                and_(models.OverrideTable.bibcode.in_(list(bibcodes)) if bibcodes else False, models.OverrideTable.bibcode != None),
+            )
+        ).order_by(models.OverrideTable.created.desc()).all()
+
+        overrides = {"bibcode": {}, "scix_id": {}}
+        for row in override_rows:
+            if getattr(row, "scix_id", None) and row.scix_id not in overrides["scix_id"]:
+                overrides["scix_id"][row.scix_id] = row
+            if getattr(row, "bibcode", None) and row.bibcode not in overrides["bibcode"]:
+                overrides["bibcode"][row.bibcode] = row
+        return overrides
+
+    def _prefetch_scores(self, session, batch_specs):
+        run_ids = {spec["record"].get("run_id") for spec in batch_specs if spec["record"].get("run_id") is not None}
+        bibcodes = {spec["record"].get("bibcode") for spec in batch_specs if spec["record"].get("bibcode")}
+        scix_ids = {spec["record"].get("scix_id") for spec in batch_specs if spec["record"].get("scix_id")}
+        if not run_ids:
+            return {}
+
+        score_rows = session.query(models.ScoreTable).filter(
+            and_(
+                models.ScoreTable.run_id.in_(list(run_ids)),
+                or_(
+                    and_(models.ScoreTable.scix_id.in_(list(scix_ids)) if scix_ids else False, models.ScoreTable.scix_id != None),
+                    and_(models.ScoreTable.bibcode.in_(list(bibcodes)) if bibcodes else False, models.ScoreTable.bibcode != None),
+                ),
+            )
+        ).order_by(models.ScoreTable.created.desc()).all()
+
+        dedupe = {}
+        for row in score_rows:
+            if getattr(row, "scix_id", None):
+                key = ("scix_id", row.scix_id, row.scores, getattr(row, "overrides_id", None), row.run_id)
+            else:
+                key = ("bibcode", row.bibcode, row.scores, getattr(row, "overrides_id", None), row.run_id)
+            dedupe.setdefault(key, row)
+        return dedupe
+
+    def _prefetch_final_collections(self, session, records):
+        bibcodes = {record.get("bibcode") for record in records if record.get("bibcode")}
+        scix_ids = {record.get("scix_id") for record in records if record.get("scix_id")}
+        if not bibcodes and not scix_ids:
+            return {"bibcode": {}, "scix_id": {}}
+
+        final_rows = session.query(models.FinalCollectionTable).filter(
+            or_(
+                and_(models.FinalCollectionTable.scix_id.in_(list(scix_ids)) if scix_ids else False, models.FinalCollectionTable.scix_id != None),
+                and_(models.FinalCollectionTable.bibcode.in_(list(bibcodes)) if bibcodes else False, models.FinalCollectionTable.bibcode != None),
+            )
+        ).order_by(models.FinalCollectionTable.created.desc()).all()
+
+        finals = {"bibcode": {}, "scix_id": {}}
+        for row in final_rows:
+            if getattr(row, "scix_id", None) and row.scix_id not in finals["scix_id"]:
+                finals["scix_id"][row.scix_id] = row
+            if getattr(row, "bibcode", None) and row.bibcode not in finals["bibcode"]:
+                finals["bibcode"][row.bibcode] = row
+        return finals
+
+    def index_records_batch(self, records):
+        if not records:
+            return []
+
+        batch_specs = []
+        stage_start = time.perf_counter()
+        with self.session_scope() as session:
+            model_id = self._get_or_create_model_id(session)
+            run_ids = sorted({record.get("run_id") for record in records if record.get("run_id") is not None})
+            for run_id in run_ids:
+                self._ensure_run_model(session, run_id, model_id)
+
+            overrides = self._prefetch_overrides(session, records)
+
+            for index, record in enumerate(records):
+                if 'operation_step' not in record:
+                    record['operation_step'] = 'classify'
+                if 'bibcode' not in record:
+                    record['bibcode'] = None
+                if 'scix_id' not in record:
+                    record['scix_id'] = None
+
+                override_row = None
+                if record.get("scix_id"):
+                    override_row = overrides["scix_id"].get(record["scix_id"])
+                if override_row is None and record.get("bibcode"):
+                    override_row = overrides["bibcode"].get(record["bibcode"])
+
+                final_collections = override_row.override if override_row is not None else record["collections"]
+                overrides_id = override_row.id if override_row is not None else None
+                scores_dict = {cat: score for cat, score in zip(config['ALLOWED_CATEGORIES'], record['scores'])}
+                score_payload = {
+                    'scores': scores_dict,
+                    'earth_science_adjustment': config['ADDITIONAL_EARTH_SCIENCE_PROCESSING'],
+                    'collections': record['collections'],
+                }
+                score_json = json.dumps(score_payload, sort_keys=True)
+                identifier_kind, identifier_value = self._record_key(record)
+                dedupe_key = (identifier_kind, identifier_value, score_json, overrides_id, record.get("run_id"))
+                batch_specs.append({
+                    "index": index,
+                    "record": record,
+                    "final_collections": final_collections,
+                    "overrides_id": overrides_id,
+                    "score_json": score_json,
+                    "dedupe_key": dedupe_key,
+                })
+
+            existing_scores = self._prefetch_scores(session, batch_specs)
+            new_score_rows = []
+            reused_score_rows = 0
+            for spec in batch_specs:
+                existing_score = existing_scores.get(spec["dedupe_key"])
+                if existing_score is not None:
+                    spec["score_id"] = existing_score.id
+                    reused_score_rows += 1
+                    continue
+                record = spec["record"]
+                score_row = models.ScoreTable(
+                    bibcode=record['bibcode'],
+                    scix_id=record['scix_id'],
+                    scores=spec["score_json"],
+                    overrides_id=spec["overrides_id"],
+                    run_id=record['run_id'],
+                )
+                spec["score_row"] = score_row
+                new_score_rows.append(score_row)
+
+            if new_score_rows:
+                session.add_all(new_score_rows)
+                session.flush()
+                for spec in batch_specs:
+                    if spec.get("score_row") is not None:
+                        spec["score_id"] = spec["score_row"].id
+
+            existing_finals = self._prefetch_final_collections(session, records)
+            new_final_rows = []
+            updated_final_rows = 0
+            for spec in batch_specs:
+                record = spec["record"]
+                existing_final = None
+                if record.get("scix_id"):
+                    existing_final = existing_finals["scix_id"].get(record["scix_id"])
+                if existing_final is None and record.get("bibcode"):
+                    existing_final = existing_finals["bibcode"].get(record["bibcode"])
+
+                if existing_final is not None:
+                    existing_final.collection = spec["final_collections"]
+                    existing_final.score_id = spec["score_id"]
+                    updated_final_rows += 1
+                else:
+                    new_final_rows.append(
+                        models.FinalCollectionTable(
+                            bibcode=record['bibcode'],
+                            scix_id=record['scix_id'],
+                            collection=spec["final_collections"],
+                            score_id=spec["score_id"],
+                        )
+                    )
+
+            if new_final_rows:
+                session.add_all(new_final_rows)
+
+            session.commit()
+
+        perf_metrics.emit_event(
+            stage="index_db",
+            run_id=run_ids[0] if len(run_ids) == 1 else None,
+            record_id=None,
+            duration_ms=(time.perf_counter() - stage_start) * 1000.0,
+            status="ok",
+            extra={
+                "record_count": len(records),
+                "batch_mode": True,
+                "batch_size": len(records),
+                "new_score_rows": len(new_score_rows),
+                "reused_score_rows": reused_score_rows,
+                "new_final_rows": len(new_final_rows),
+                "updated_final_rows": updated_final_rows,
+            },
+            config=config,
+        )
+        return [(spec["record"], "record_indexed") for spec in batch_specs]
+
     def index_run(self):
         """
         Create and persist a new RunTable record in the database.

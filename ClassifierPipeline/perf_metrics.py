@@ -409,7 +409,7 @@ def aggregate_events(
         extra = event.get("extra", {}) or {}
         if duration is not None:
             duration_value = float(duration)
-            if stage == "classify":
+            if stage in {"classify", "index_db"}:
                 record_count = int(extra.get("record_count", 0) or 0)
                 normalized_duration = duration_value / record_count if record_count > 0 else duration_value
                 stages.setdefault(stage, []).append(normalized_duration)
@@ -640,6 +640,8 @@ def render_markdown(summary: Dict[str, Any], output_path: str) -> None:
     if batch_latency or batch_sizes:
         classify_batch_latency = batch_latency.get("classify", {}) or {}
         classify_batch_sizes = batch_sizes.get("classify", {}) or {}
+        index_db_batch_latency = batch_latency.get("index_db", {}) or {}
+        index_db_batch_sizes = batch_sizes.get("index_db", {}) or {}
         lines.extend([
             "## Batch Metrics",
             "",
@@ -647,6 +649,10 @@ def render_markdown(summary: Dict[str, Any], output_path: str) -> None:
             f"- **Classify Batch Size p95**: `{_fmt(classify_batch_sizes.get('p95'))}`",
             f"- **Classify Batch Latency Mean**: `{_fmt(classify_batch_latency.get('mean'))} ms`",
             f"- **Classify Batch Latency p95**: `{_fmt(classify_batch_latency.get('p95'))} ms`",
+            f"- **Index DB Batch Size Mean**: `{_fmt(index_db_batch_sizes.get('mean'))}`",
+            f"- **Index DB Batch Size p95**: `{_fmt(index_db_batch_sizes.get('p95'))}`",
+            f"- **Index DB Batch Latency Mean**: `{_fmt(index_db_batch_latency.get('mean'))} ms`",
+            f"- **Index DB Batch Latency p95**: `{_fmt(index_db_batch_latency.get('p95'))} ms`",
             "",
         ])
 

@@ -1,4 +1,5 @@
 import importlib
+import json
 import types
 
 
@@ -32,6 +33,10 @@ class FakeSession:
         if getattr(obj, "id", None) is None:
             obj.id = len(self.added) + 1
         self.added.append(obj)
+
+    def add_all(self, objects):
+        for obj in objects:
+            self.add(obj)
 
     def commit(self):
         self.commit_count += 1
@@ -295,6 +300,71 @@ def test_ensure_run_model_skips_requery_for_bound_run(monkeypatch, base_fake_con
     app._ensure_run_model(session, 7, 3)
     assert run_row.model_id == 3
     assert session.query_models == [module.models.RunTable]
+
+
+def test_index_records_batch_inserts_scores_and_final_rows_in_one_commit(monkeypatch, base_fake_config, dummy_logger):
+    module = _import_app_module(monkeypatch, base_fake_config, dummy_logger)
+    events = []
+    module.perf_metrics.emit_event = lambda **kwargs: events.append(kwargs)
+    session = FakeSession([
+        FakeQuery(first_result=None),  # model
+        FakeQuery(first_result=types.SimpleNamespace(id=7, model_id=None)),  # run
+        FakeQuery(all_result=[]),  # overrides
+        FakeQuery(all_result=[]),  # scores
+        FakeQuery(all_result=[]),  # finals
+    ])
+    app = _new_app(module, session)
+    records = [
+        {"run_id": 7, "bibcode": "B1", "scix_id": None, "collections": ["Astronomy"], "scores": [0.9] * 8, "operation_step": "classify"},
+        {"run_id": 7, "bibcode": "B2", "scix_id": None, "collections": ["Astronomy"], "scores": [0.8] * 8, "operation_step": "classify"},
+    ]
+    results = app.index_records_batch(records)
+    assert [status for _, status in results] == ["record_indexed", "record_indexed"]
+    assert session.commit_count == 1
+    assert session.flush_count == 2
+    assert events[0]["stage"] == "index_db"
+    assert events[0]["extra"]["record_count"] == 2
+
+
+def test_index_records_batch_reuses_existing_score_rows(monkeypatch, base_fake_config, dummy_logger):
+    module = _import_app_module(monkeypatch, base_fake_config, dummy_logger)
+    score_payload = {
+        'scores': {cat: 0.9 for cat in base_fake_config["ALLOWED_CATEGORIES"]},
+        'earth_science_adjustment': base_fake_config['ADDITIONAL_EARTH_SCIENCE_PROCESSING'],
+        'collections': ["Astronomy"],
+    }
+    existing_score = types.SimpleNamespace(id=9, bibcode="B1", scix_id=None, scores=json.dumps(score_payload, sort_keys=True), overrides_id=None, run_id=7)
+    existing_final = types.SimpleNamespace(collection=None, score_id=None)
+    session = FakeSession([
+        FakeQuery(first_result=None),
+        FakeQuery(first_result=types.SimpleNamespace(id=7, model_id=None)),
+        FakeQuery(all_result=[]),
+        FakeQuery(all_result=[existing_score]),
+        FakeQuery(all_result=[types.SimpleNamespace(bibcode="B1", scix_id=None, collection=None, score_id=None, created=1)]),
+    ])
+    app = _new_app(module, session)
+    records = [{"run_id": 7, "bibcode": "B1", "scix_id": None, "collections": ["Astronomy"], "scores": [0.9] * 8, "operation_step": "classify"}]
+    results = app.index_records_batch(records)
+    assert results[0][1] == "record_indexed"
+    assert all(not isinstance(item, module.models.ScoreTable) for item in session.added if not isinstance(item, module.models.ModelTable))
+
+
+def test_index_records_batch_preserves_input_order(monkeypatch, base_fake_config, dummy_logger):
+    module = _import_app_module(monkeypatch, base_fake_config, dummy_logger)
+    session = FakeSession([
+        FakeQuery(first_result=None),
+        FakeQuery(first_result=types.SimpleNamespace(id=7, model_id=None)),
+        FakeQuery(all_result=[]),
+        FakeQuery(all_result=[]),
+        FakeQuery(all_result=[]),
+    ])
+    app = _new_app(module, session)
+    records = [
+        {"run_id": 7, "bibcode": "B1", "scix_id": None, "collections": ["Astronomy"], "scores": [0.9] * 8, "operation_step": "classify"},
+        {"run_id": 7, "bibcode": "B2", "scix_id": None, "collections": ["Astronomy"], "scores": [0.8] * 8, "operation_step": "classify"},
+    ]
+    results = app.index_records_batch(records)
+    assert [record["bibcode"] for record, _ in results] == ["B1", "B2"]
 
 
 def test_query_final_collection_table_by_run_id(monkeypatch, base_fake_config, dummy_logger):
