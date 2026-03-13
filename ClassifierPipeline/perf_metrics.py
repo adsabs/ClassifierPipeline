@@ -386,6 +386,8 @@ def aggregate_events(
     expected_records: Optional[int] = None,
 ) -> Dict[str, Any]:
     stages: Dict[str, List[float]] = {}
+    batch_latencies: Dict[str, List[float]] = {}
+    batch_sizes: Dict[str, List[float]] = {}
     stage_errors: Dict[str, int] = {}
 
     submitted = 0
@@ -400,14 +402,24 @@ def aggregate_events(
         status = event.get("status", "ok")
         duration = event.get("duration_ms")
 
-        if duration is not None:
-            stages.setdefault(stage, []).append(float(duration))
-
         if status != "ok":
             failure_count += 1
             stage_errors[stage] = stage_errors.get(stage, 0) + 1
 
         extra = event.get("extra", {}) or {}
+        if duration is not None:
+            duration_value = float(duration)
+            if stage == "classify":
+                record_count = int(extra.get("record_count", 0) or 0)
+                normalized_duration = duration_value / record_count if record_count > 0 else duration_value
+                stages.setdefault(stage, []).append(normalized_duration)
+                if extra.get("batch_mode") or record_count > 1:
+                    batch_latencies.setdefault(stage, []).append(duration_value)
+                    if record_count > 0:
+                        batch_sizes.setdefault(stage, []).append(float(record_count))
+            else:
+                stages.setdefault(stage, []).append(duration_value)
+
         if stage == "ingest_enqueue":
             submitted += int(extra.get("record_count", 1))
         elif stage == "index":
@@ -431,6 +443,8 @@ def aggregate_events(
         throughput = (indexed / wall_duration_s) * 60.0
 
     latency_ms = {stage: _duration_stats(values) for stage, values in stages.items()}
+    batch_latency_ms = {stage: _duration_stats(values) for stage, values in batch_latencies.items()}
+    batch_size_stats = {stage: _numeric_stats(values, include_p99=True) for stage, values in batch_sizes.items()}
 
     status = "complete"
     backlog = None
@@ -451,6 +465,8 @@ def aggregate_events(
             "overall_records_per_minute": throughput,
         },
         "latency_ms": latency_ms,
+        "batch_latency_ms": batch_latency_ms,
+        "batch_sizes": batch_size_stats,
         "duration_s": {
             "wall_clock": wall_duration_s,
         },
@@ -546,6 +562,8 @@ def _fmt(value: Optional[float], places: int = 2) -> str:
 
 def render_markdown(summary: Dict[str, Any], output_path: str) -> None:
     latency = summary.get("latency_ms", {}) or {}
+    batch_latency = summary.get("batch_latency_ms", {}) or {}
+    batch_sizes = summary.get("batch_sizes", {}) or {}
     counts = summary.get("counts", {}) or {}
     throughput_info = summary.get("throughput", {}) or {}
     throughput = throughput_info.get("overall_records_per_minute")
@@ -617,6 +635,22 @@ def render_markdown(summary: Dict[str, Any], output_path: str) -> None:
         "",
         f"- Highest p95 stage: `{slowest_stage or 'n/a'}` ({_fmt(slowest_p95)} ms)",
         "",
+    ])
+
+    if batch_latency or batch_sizes:
+        classify_batch_latency = batch_latency.get("classify", {}) or {}
+        classify_batch_sizes = batch_sizes.get("classify", {}) or {}
+        lines.extend([
+            "## Batch Metrics",
+            "",
+            f"- **Classify Batch Size Mean**: `{_fmt(classify_batch_sizes.get('mean'))}`",
+            f"- **Classify Batch Size p95**: `{_fmt(classify_batch_sizes.get('p95'))}`",
+            f"- **Classify Batch Latency Mean**: `{_fmt(classify_batch_latency.get('mean'))} ms`",
+            f"- **Classify Batch Latency p95**: `{_fmt(classify_batch_latency.get('p95'))} ms`",
+            "",
+        ])
+
+    lines.extend([
         "## System Load",
         "",
         f"- **Sample Count**: `{system_load_collection.get('sample_count', 0)}`",

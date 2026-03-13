@@ -50,6 +50,7 @@ def base_fake_config():
         "DELAY_MESSAGE": False,
         "FAKE_DATA": False,
         "OPERATION_STEP": "classify_verify",
+        "CLASSIFY_STAGE_BATCH_SIZE": 100,
         "TEST_INPUT_DATA": "ClassifierPipeline/tests/stub_data/classifier_request.json",
     }
 

@@ -93,6 +93,47 @@ def test_task_update_record_creates_run_id_and_output_file(monkeypatch, base_fak
     assert calls["events"][0]["stage"] == "ingest_enqueue"
 
 
+def test_task_update_record_forwards_fixed_size_sub_batches(monkeypatch, base_fake_config, dummy_logger):
+    module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
+    module.config["CLASSIFY_STAGE_BATCH_SIZE"] = 2
+    module.utils.prepare_output_file = lambda path: None
+    module.utils.classifyRequestRecordList_to_list = lambda message: [dict(item) for item in message]
+    module.utils.list_to_ClassifyRequestRecordList = lambda payload: payload
+    module.perf_metrics.emit_event = lambda **kwargs: None
+    forwarded = []
+    module.task_send_input_record_to_classifier = lambda message: forwarded.append(message)
+
+    payload = [
+        {"bibcode": "B1", "title": "T1", "abstract": "A1"},
+        {"bibcode": "B2", "title": "T2", "abstract": "A2"},
+        {"bibcode": "B3", "title": "T3", "abstract": "A3"},
+    ]
+    result = module.task_update_record(payload)
+    assert result["records_submitted"] == 3
+    assert [len(batch) for batch in forwarded] == [2, 1]
+    assert forwarded[0][0]["run_id"] == forwarded[0][1]["run_id"]
+
+
+def test_task_update_record_emits_batch_enqueue_metric(monkeypatch, base_fake_config, dummy_logger):
+    module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
+    module.config["CLASSIFY_STAGE_BATCH_SIZE"] = 2
+    module.utils.prepare_output_file = lambda path: None
+    module.utils.classifyRequestRecordList_to_list = lambda message: [dict(item) for item in message]
+    module.utils.list_to_ClassifyRequestRecordList = lambda payload: payload
+    events = []
+    module.perf_metrics.emit_event = lambda **kwargs: events.append(kwargs)
+    module.task_send_input_record_to_classifier = lambda message: None
+    module.task_update_record(
+        [
+            {"bibcode": "B1", "title": "T1", "abstract": "A1"},
+            {"bibcode": "B2", "title": "T2", "abstract": "A2"},
+            {"bibcode": "B3", "title": "T3", "abstract": "A3"},
+        ]
+    )
+    assert [event["extra"]["record_count"] for event in events] == [2, 1]
+    assert events[0]["record_id"] is None
+
+
 def test_task_update_record_reuses_existing_run_id(monkeypatch, base_fake_config, dummy_logger):
     module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
     module.utils.prepare_output_file = lambda path: None
@@ -139,6 +180,81 @@ def test_task_send_input_record_to_classifier_real_inference(monkeypatch, base_f
     assert forwarded[0][0]["categories"] == ["Astronomy"]
     assert forwarded[0][0]["scores"] == [0.9]
     assert events[0]["stage"] == "classify"
+
+
+def test_task_send_input_record_to_classifier_real_inference_batch(monkeypatch, base_fake_config, dummy_logger):
+    module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
+    module.config["FAKE_DATA"] = False
+    monkeypatch.delenv("PERF_FORCE_FAKE_DATA", raising=False)
+    module.utils.classifyRequestRecordList_to_list = lambda message: [dict(item) for item in message]
+    module.utils.classify_record_from_scores = lambda record: {**record, "classified": True}
+    module.utils.list_to_ClassifyRequestRecordList = lambda payload: payload
+    calls = []
+    events = []
+    forwarded = []
+    module.perf_metrics.emit_event = lambda **kwargs: events.append(kwargs)
+    module.task_index_classified_record = lambda message: forwarded.append(message)
+    module.classifier = types.SimpleNamespace(
+        batch_score_SciX_categories=lambda texts: (calls.append(list(texts)) or ([["Astronomy"], ["Heliophysics"]], [[0.9], [0.8]]))
+    )
+    message = [
+        {"bibcode": "B1", "title": "T1", "abstract": "A1", "run_id": "R"},
+        {"bibcode": "B2", "title": "T2", "abstract": "A2", "run_id": "R"},
+    ]
+    module.task_send_input_record_to_classifier(message)
+    assert calls == [["T1 A1", "T2 A2"]]
+    assert [record["categories"] for record in forwarded[0]] == [["Astronomy"], ["Heliophysics"]]
+    assert events[0]["extra"]["record_count"] == 2
+
+
+def test_task_send_input_record_to_classifier_mixed_fake_and_real_batch(monkeypatch, base_fake_config, dummy_logger):
+    module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
+    module.config["FAKE_DATA"] = False
+    monkeypatch.delenv("PERF_FORCE_FAKE_DATA", raising=False)
+    module.utils.classifyRequestRecordList_to_list = lambda message: [dict(item) for item in message]
+    module.utils.return_fake_data = lambda record: {**record, "categories": ["fake"], "scores": [1.0]}
+    module.utils.classify_record_from_scores = lambda record: record
+    module.utils.list_to_ClassifyRequestRecordList = lambda payload: payload
+    forwarded = []
+    calls = []
+    module.task_index_classified_record = lambda message: forwarded.append(message)
+    module.perf_metrics.emit_event = lambda **kwargs: None
+    module.classifier = types.SimpleNamespace(
+        batch_score_SciX_categories=lambda texts: (calls.append(list(texts)) or ([["Astronomy"]], [[0.9]]))
+    )
+    module.task_send_input_record_to_classifier(
+        [
+            {"bibcode": "B1", "title": "T1", "abstract": "A1", "run_id": "R"},
+            {"bibcode": "B2", "title": "T2", "abstract": "A2", "run_id": "R", "fake_data": True},
+        ]
+    )
+    assert calls == [["T1 A1"]]
+    assert [record["categories"] for record in forwarded[0]] == [["Astronomy"], ["fake"]]
+
+
+def test_task_send_input_record_to_classifier_preserves_input_order(monkeypatch, base_fake_config, dummy_logger):
+    module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
+    module.config["FAKE_DATA"] = False
+    monkeypatch.delenv("PERF_FORCE_FAKE_DATA", raising=False)
+    module.utils.classifyRequestRecordList_to_list = lambda message: [dict(item) for item in message]
+    module.utils.return_fake_data = lambda record: {**record, "categories": ["fake"], "scores": [1.0]}
+    module.utils.classify_record_from_scores = lambda record: record
+    module.utils.list_to_ClassifyRequestRecordList = lambda payload: payload
+    forwarded = []
+    module.task_index_classified_record = lambda message: forwarded.append(message)
+    module.perf_metrics.emit_event = lambda **kwargs: None
+    module.classifier = types.SimpleNamespace(
+        batch_score_SciX_categories=lambda texts: ([["Astronomy"], ["Heliophysics"]], [[0.9], [0.8]])
+    )
+    module.task_send_input_record_to_classifier(
+        [
+            {"bibcode": "B1", "title": "T1", "abstract": "A1", "run_id": "R"},
+            {"bibcode": "B2", "title": "T2", "abstract": "A2", "run_id": "R", "fake_data": True},
+            {"bibcode": "B3", "title": "T3", "abstract": "A3", "run_id": "R"},
+        ]
+    )
+    assert [record["bibcode"] for record in forwarded[0]] == ["B1", "B2", "B3"]
+    assert [record["categories"] for record in forwarded[0]] == [["Astronomy"], ["fake"], ["Heliophysics"]]
 
 
 def test_task_send_input_record_to_classifier_fake_data_config(monkeypatch, base_fake_config, dummy_logger):
@@ -195,6 +311,22 @@ def test_task_index_classified_record_classify_verify_path(monkeypatch, base_fak
     assert calls and calls[0]["bibcode"] == "B"
 
 
+def test_task_index_classified_record_processes_all_records_in_batch(monkeypatch, base_fake_config, dummy_logger):
+    module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
+    module.utils.classifyRequestRecordList_to_list = lambda message: [dict(item) for item in message]
+    indexed = []
+    module.app.index_record = lambda record: (indexed.append(record["bibcode"]) or (record, "record_indexed"))
+    module.perf_metrics.emit_event = lambda **kwargs: None
+    module.utils.add_record_to_output_file = lambda record: None
+    module.task_index_classified_record(
+        [
+            {"bibcode": "B1", "operation_step": "classify_verify", "run_id": "R"},
+            {"bibcode": "B2", "operation_step": "classify_verify", "run_id": "R"},
+        ]
+    )
+    assert indexed == ["B1", "B2"]
+
+
 def test_task_index_classified_record_classify_path(monkeypatch, base_fake_config, dummy_logger):
     module, fake_app = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
     module.utils.classifyRequestRecordList_to_list = lambda message: [dict(message)]
@@ -207,6 +339,26 @@ def test_task_index_classified_record_classify_path(monkeypatch, base_fake_confi
     module.task_resend_to_master = lambda message: resend_calls.append(message)
     module.task_index_classified_record({"bibcode": "B", "operation_step": "classify", "run_id": "R"})
     assert app_calls and resend_calls
+
+
+def test_task_index_classified_record_classify_batch_path(monkeypatch, base_fake_config, dummy_logger):
+    module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
+    module.utils.classifyRequestRecordList_to_list = lambda message: [dict(item) for item in message]
+    module.app.index_record = lambda record: (record, "record_indexed")
+    module.perf_metrics.emit_event = lambda **kwargs: None
+    app_calls = []
+    resend_calls = []
+    module.app.add_record_to_output_file = lambda record: app_calls.append(record["bibcode"])
+    module.utils.list_to_ClassifyRequestRecordList = lambda payload: payload
+    module.task_resend_to_master = lambda message: resend_calls.append(message[0]["bibcode"])
+    module.task_index_classified_record(
+        [
+            {"bibcode": "B1", "operation_step": "classify", "run_id": "R"},
+            {"bibcode": "B2", "operation_step": "classify", "run_id": "R"},
+        ]
+    )
+    assert app_calls == ["B1", "B2"]
+    assert resend_calls == ["B1", "B2"]
 
 
 def test_task_index_classified_record_validated_path(monkeypatch, base_fake_config, dummy_logger):
