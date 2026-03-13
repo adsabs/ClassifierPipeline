@@ -6,7 +6,7 @@ import types
 def _import_module(monkeypatch, base_fake_config, dummy_logger):
     tokenizer_calls = []
     model_calls = []
-    debug_calls = []
+    warning_calls = []
 
     class DummyTokenizer:
         pass
@@ -30,18 +30,18 @@ def _import_module(monkeypatch, base_fake_config, dummy_logger):
     fake_transformers.AutoTokenizer = AutoTokenizer
     fake_transformers.AutoModelForSequenceClassification = AutoModelForSequenceClassification
     fake_transformers.TokenClassificationPipeline = object
-    fake_transformers.logging = types.SimpleNamespace(set_verbosity_debug=lambda: debug_calls.append(True))
+    fake_transformers.logging = types.SimpleNamespace(set_verbosity_warning=lambda: warning_calls.append(True))
 
     monkeypatch.setattr("adsputils.load_config", lambda proj_home=None: dict(base_fake_config))
     monkeypatch.setattr("adsputils.setup_logging", lambda *args, **kwargs: dummy_logger)
     monkeypatch.setitem(sys.modules, "transformers", fake_transformers)
     sys.modules.pop("ClassifierPipeline.astrobert_classification", None)
     module = importlib.import_module("ClassifierPipeline.astrobert_classification")
-    return module, tokenizer_calls, model_calls, debug_calls, DummyTokenizer, DummyModel
+    return module, tokenizer_calls, model_calls, warning_calls, DummyTokenizer, DummyModel
 
 
 def test_import_loads_model_and_tokenizer_from_config(monkeypatch, base_fake_config, dummy_logger):
-    module, tokenizer_calls, model_calls, debug_calls, DummyTokenizer, DummyModel = _import_module(
+    module, tokenizer_calls, model_calls, warning_calls, DummyTokenizer, DummyModel = _import_module(
         monkeypatch, base_fake_config, dummy_logger
     )
     assert len(tokenizer_calls) == 1
@@ -55,7 +55,7 @@ def test_import_loads_model_and_tokenizer_from_config(monkeypatch, base_fake_con
     assert model_kwargs["revision"] == base_fake_config["CLASSIFICATION_PRETRAINED_MODEL_REVISION"]
     assert model_kwargs["num_labels"] == len(base_fake_config["ALLOWED_CATEGORIES"])
     assert model_kwargs["problem_type"] == "multi_label_classification"
-    assert debug_calls == [True]
+    assert warning_calls == [True]
     assert isinstance(module.AstroBERTClassification.tokenizer, DummyTokenizer)
     assert isinstance(module.AstroBERTClassification.model, DummyModel)
 
@@ -78,6 +78,6 @@ def test_class_wrapper_exposes_loaded_singletons(monkeypatch, base_fake_config, 
     assert wrapper.label2id == module.label2id
 
 
-def test_transformers_debug_logging_is_configured_currently(monkeypatch, base_fake_config, dummy_logger):
-    _, _, _, debug_calls, _, _ = _import_module(monkeypatch, base_fake_config, dummy_logger)
-    assert debug_calls == [True]
+def test_transformers_warning_logging_is_configured(monkeypatch, base_fake_config, dummy_logger):
+    _, _, _, warning_calls, _, _ = _import_module(monkeypatch, base_fake_config, dummy_logger)
+    assert warning_calls == [True]

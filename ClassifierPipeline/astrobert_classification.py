@@ -26,9 +26,8 @@ from adsputils import setup_logging, load_config
 
 
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
-from transformers import TokenClassificationPipeline
 import transformers
-transformers.logging.set_verbosity_debug()
+transformers.logging.set_verbosity_warning()
 
 proj_home = os.path.realpath(os.path.join(os.path.dirname(__file__), "../"))
 config = load_config(proj_home=proj_home)
@@ -71,4 +70,3 @@ class AstroBERTClassification():
     labels = labels
     id2label = id2label
     label2id = label2id
-

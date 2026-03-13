@@ -25,6 +25,8 @@ class FakeSession:
         self.queries = list(queries or [])
         self.added = []
         self.commit_count = 0
+        self.flush_count = 0
+        self.query_models = []
 
     def add(self, obj):
         if getattr(obj, "id", None) is None:
@@ -34,7 +36,14 @@ class FakeSession:
     def commit(self):
         self.commit_count += 1
 
+    def flush(self):
+        self.flush_count += 1
+        for index, obj in enumerate(self.added, start=1):
+            if getattr(obj, "id", None) is None:
+                obj.id = index
+
     def query(self, model):
+        self.query_models.append(model)
         return self.queries.pop(0)
 
 
@@ -99,7 +108,8 @@ def test_index_record_classify_path_creates_missing_rows(monkeypatch, base_fake_
     out_record, status = app.index_record(record)
     assert status == "record_indexed"
     assert out_record is record
-    assert session.commit_count >= 3
+    assert session.commit_count == 1
+    assert session.flush_count == 2
     assert len(session.added) >= 3
 
 
@@ -161,7 +171,7 @@ def test_index_record_classify_path_skips_duplicate_score_insert(monkeypatch, ba
 
 def test_index_record_classify_path_updates_existing_final_collection(monkeypatch, base_fake_config, dummy_logger):
     module = _import_app_module(monkeypatch, base_fake_config, dummy_logger)
-    existing_final = types.SimpleNamespace(final_collection=None)
+    existing_final = types.SimpleNamespace(collection=None, score_id=None)
     queries = [
         FakeQuery(first_result=None),
         FakeQuery(first_result=types.SimpleNamespace(id=7, model_id=None)),
@@ -174,7 +184,45 @@ def test_index_record_classify_path_updates_existing_final_collection(monkeypatc
     record = {"run_id": 7, "bibcode": "B", "collections": ["Astronomy"], "scores": [0.9] * 8, "operation_step": "classify"}
     _, status = app.index_record(record)
     assert status == "record_indexed"
-    assert existing_final.final_collection == ["Astronomy"]
+    assert existing_final.collection == ["Astronomy"]
+
+
+def test_index_record_classify_path_uses_existing_score_id_for_duplicate(monkeypatch, base_fake_config, dummy_logger):
+    module = _import_app_module(monkeypatch, base_fake_config, dummy_logger)
+    existing_score = types.SimpleNamespace(id=9)
+    existing_final = types.SimpleNamespace(collection=None, score_id=None)
+    queries = [
+        FakeQuery(first_result=None),
+        FakeQuery(first_result=types.SimpleNamespace(id=7, model_id=None)),
+        FakeQuery(first_result=None),
+        FakeQuery(first_result=existing_score),
+        FakeQuery(first_result=existing_final),
+    ]
+    session = FakeSession(queries)
+    app = _new_app(module, session)
+    record = {"run_id": 7, "bibcode": "B", "collections": ["Astronomy"], "scores": [0.9] * 8, "operation_step": "classify"}
+    _, status = app.index_record(record)
+    assert status == "record_indexed"
+    assert existing_final.score_id == 9
+    assert session.commit_count == 1
+
+
+def test_index_record_classify_path_updates_collection_field_not_final_collection(monkeypatch, base_fake_config, dummy_logger):
+    module = _import_app_module(monkeypatch, base_fake_config, dummy_logger)
+    existing_final = types.SimpleNamespace(collection=None, score_id=None, final_collection=None)
+    queries = [
+        FakeQuery(first_result=None),
+        FakeQuery(first_result=types.SimpleNamespace(id=7, model_id=None)),
+        FakeQuery(first_result=None),
+        FakeQuery(first_result=None),
+        FakeQuery(first_result=existing_final),
+    ]
+    session = FakeSession(queries)
+    app = _new_app(module, session)
+    record = {"run_id": 7, "bibcode": "B", "collections": ["Astronomy"], "scores": [0.9] * 8, "operation_step": "classify"}
+    app.index_record(record)
+    assert existing_final.collection == ["Astronomy"]
+    assert existing_final.final_collection is None
 
 
 def test_index_record_validation_path_inserts_override_and_updates_records(monkeypatch, base_fake_config, dummy_logger):
@@ -194,6 +242,7 @@ def test_index_record_validation_path_inserts_override_and_updates_records(monke
     assert score_row.overrides_id == 1
     assert final_row.collection == ["Astronomy"]
     assert final_row.validated is True
+    assert session.commit_count == 1
 
 
 def test_index_record_validation_path_marks_unvalidated_without_override(monkeypatch, base_fake_config, dummy_logger):
@@ -211,6 +260,7 @@ def test_index_record_validation_path_marks_unvalidated_without_override(monkeyp
     _, status = app.index_record(record)
     assert status == "record_validated"
     assert false_row.validated is True
+    assert session.commit_count == 1
 
 
 def test_index_record_validation_path_returns_previously_validated(monkeypatch, base_fake_config, dummy_logger):
@@ -223,6 +273,28 @@ def test_index_record_validation_path_returns_previously_validated(monkeypatch, 
     record = {"bibcode": "B", "scix_id": None, "override": ["Astronomy"], "operation_step": "validate"}
     _, status = app.index_record(record)
     assert status == "record_validated"
+    assert session.commit_count == 0
+
+
+def test_get_or_create_model_id_uses_cache_on_warm_path(monkeypatch, base_fake_config, dummy_logger):
+    module = _import_app_module(monkeypatch, base_fake_config, dummy_logger)
+    session = FakeSession([FakeQuery(first_result=None)])
+    app = _new_app(module, session)
+    first_id = app._get_or_create_model_id(session)
+    second_id = app._get_or_create_model_id(session)
+    assert first_id == second_id == 1
+    assert session.query_models == [module.models.ModelTable]
+
+
+def test_ensure_run_model_skips_requery_for_bound_run(monkeypatch, base_fake_config, dummy_logger):
+    module = _import_app_module(monkeypatch, base_fake_config, dummy_logger)
+    run_row = types.SimpleNamespace(id=7, model_id=None)
+    session = FakeSession([FakeQuery(first_result=run_row)])
+    app = _new_app(module, session)
+    app._ensure_run_model(session, 7, 3)
+    app._ensure_run_model(session, 7, 3)
+    assert run_row.model_id == 3
+    assert session.query_models == [module.models.RunTable]
 
 
 def test_query_final_collection_table_by_run_id(monkeypatch, base_fake_config, dummy_logger):

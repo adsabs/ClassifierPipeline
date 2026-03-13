@@ -61,6 +61,60 @@ class SciXClassifierCelery(ADSCelery):
     - Update validated collections and handle manual overrides
     """
 
+    def _ensure_runtime_caches(self):
+        if not hasattr(self, "_cached_model_metadata_key"):
+            self._cached_model_metadata_key = None
+        if not hasattr(self, "_cached_model_id"):
+            self._cached_model_id = None
+        if not hasattr(self, "_run_model_bound"):
+            self._run_model_bound = set()
+
+    def _build_model_metadata(self):
+        model_dict = {
+            'model': config['CLASSIFICATION_PRETRAINED_MODEL'],
+            'revision': config['CLASSIFICATION_PRETRAINED_MODEL_REVISION'],
+            'tokenizer': config['CLASSIFICATION_PRETRAINED_MODEL_TOKENIZER'],
+        }
+        postprocessing_dict = {
+            'ADDITIONAL_EARTH_SCIENCE_PROCESSING': config['ADDITIONAL_EARTH_SCIENCE_PROCESSING'],
+            'ADDITIONAL_EARTH_SCIENCE_PROCESSING_THRESHOLD': config['ADDITIONAL_EARTH_SCIENCE_PROCESSING_THRESHOLD'],
+            'CLASSIFICATION_THRESHOLDS': config['CLASSIFICATION_THRESHOLDS'],
+        }
+        return json.dumps(model_dict, sort_keys=True), json.dumps(postprocessing_dict, sort_keys=True)
+
+    def _get_or_create_model_id(self, session):
+        self._ensure_runtime_caches()
+        model_json, postprocessing_json = self._build_model_metadata()
+        cache_key = (model_json, postprocessing_json)
+        if self._cached_model_metadata_key == cache_key and self._cached_model_id is not None:
+            return self._cached_model_id
+
+        model_row = session.query(models.ModelTable).filter(
+            and_(models.ModelTable.model == model_json, models.ModelTable.postprocessing == postprocessing_json)
+        ).order_by(models.ModelTable.created.desc()).first()
+
+        if model_row is None:
+            model_row = models.ModelTable(model=model_json, postprocessing=postprocessing_json)
+            session.add(model_row)
+            session.flush()
+
+        self._cached_model_metadata_key = cache_key
+        self._cached_model_id = model_row.id
+        return model_row.id
+
+    def _ensure_run_model(self, session, run_id, model_id):
+        self._ensure_runtime_caches()
+        if run_id in self._run_model_bound:
+            return
+
+        run_row = session.query(models.RunTable).filter(models.RunTable.id == run_id).order_by(models.RunTable.created.desc()).first()
+        if run_row is not None and run_row.model_id != model_id:
+            run_row.model_id = model_id
+        self._run_model_bound.add(run_id)
+
+    def add_record_to_output_file(self, record):
+        utils.add_record_to_output_file(record)
+
     def index_run(self):
         """
         Create and persist a new RunTable record in the database.
@@ -108,40 +162,8 @@ class SciXClassifierCelery(ADSCelery):
             # Initial indexing of automatic classification results
             if record['operation_step'] == 'classify' or record['operation_step'] == 'classify_verify':
                 logger.debug('Indexing new record')
-
-                # Model Table
-                model = {'model' : config['CLASSIFICATION_PRETRAINED_MODEL'],
-                         'revision' : config['CLASSIFICATION_PRETRAINED_MODEL_REVISION'],
-                         'tokenizer' : config['CLASSIFICATION_PRETRAINED_MODEL_TOKENIZER']
-                         }
-                postprocessing = {'ADDITIONAL_EARTH_SCIENCE_PROCESSING' : config['ADDITIONAL_EARTH_SCIENCE_PROCESSING'],
-                                  'ADDITIONAL_EARTH_SCIENCE_PROCESSING_THRESHOLD' : config['ADDITIONAL_EARTH_SCIENCE_PROCESSING_THRESHOLD'],
-                                  'CLASSIFICATION_THRESHOLDS' : config['CLASSIFICATION_THRESHOLDS']
-                                  }
-                model_row = models.ModelTable(model=json.dumps(model),
-                                              postprocessing=json.dumps(postprocessing)
-                                              )
-
-                logger.debug('Checking model query')
-                check_model_query = session.query(models.ModelTable).filter(and_(models.ModelTable.model == json.dumps(model), models.ModelTable.postprocessing == json.dumps(postprocessing))).order_by(models.ModelTable.created.desc()).first()
-
-                logger.debug(f'Check Model Query: {check_model_query}')
-                if check_model_query is None:
-                    session.add(model_row)
-                    session.commit()
-                    model_id = model_row.id
-                else:
-                    model_id = check_model_query.id
-
-                # Run Table
-                check_run_query = session.query(models.RunTable).filter(models.RunTable.id == record['run_id']).order_by(models.RunTable.created.desc()).first()
-
-                logger.debug(f'Check Run Query: {check_run_query}')
-                if check_run_query is not None:
-
-                    if check_run_query.model_id != model_id:
-                        check_run_query.model_id = model_id 
-                        session.commit()
+                model_id = self._get_or_create_model_id(session)
+                self._ensure_run_model(session, record['run_id'], model_id)
 
                 # Override Table
                 check_overrides_query = session.query(models.OverrideTable).filter(or_(and_(models.OverrideTable.scix_id == record['scix_id'], models.OverrideTable.scix_id != None), and_(models.OverrideTable.bibcode == record['bibcode'], models.OverrideTable.bibcode != None))).order_by(models.OverrideTable.created.desc()).first()
@@ -175,12 +197,15 @@ class SciXClassifierCelery(ADSCelery):
                 logger.debug(f'Check Scores Query: {check_scores_query}')
                 if check_scores_query is None:
                     session.add(score_row)
-                    session.commit()
+                    session.flush()
                     score_id = score_row.id
+                else:
+                    score_id = check_scores_query.id
 
                 final_collections_row = models.FinalCollectionTable(bibcode = record['bibcode'], 
+                                                                        scix_id = record['scix_id'],
                                                                         collection = final_collections,
-                                                                        score_id = score_row.id
+                                                                        score_id = score_id
                                                                         )
 
 
@@ -190,10 +215,10 @@ class SciXClassifierCelery(ADSCelery):
                 logger.debug(f'Check Final Collections Query: {check_final_collection_query}')
                 if check_final_collection_query is None:
                     session.add(final_collections_row)
-                    session.commit()
                 if check_final_collection_query is not None:
-                    check_final_collection_query.final_collection = final_collections
-                    session.commit()
+                    check_final_collection_query.collection = final_collections
+                    check_final_collection_query.score_id = score_id
+                session.commit()
 
                 result = (record, "record_indexed")
                 perf_metrics.emit_event(
@@ -222,14 +247,13 @@ class SciXClassifierCelery(ADSCelery):
                                                         scix_id=record['scix_id'],
                                                         override=record['override'])
                     session.add(override_row)
-                    session.commit()
+                    session.flush()
                     overrides_id = override_row.id
 
                     update_scores_query = session.query(models.ScoreTable).filter(or_(and_(models.ScoreTable.scix_id == record['scix_id'], models.ScoreTable.scix_id != None), and_(models.ScoreTable.bibcode == record['bibcode'], models.ScoreTable.bibcode != None))).order_by(models.ScoreTable.created.desc()).all()
                     logger.debug(f'update_scores_query: {update_scores_query}')
                     for element in update_scores_query:
                         element.overrides_id = overrides_id
-                        session.commit()
 
                     update_final_collection_query = session.query(models.FinalCollectionTable).filter(or_(and_(models.FinalCollectionTable.scix_id == record['scix_id'], models.FinalCollectionTable.scix_id != None), and_(models.FinalCollectionTable.bibcode == record['bibcode'], models.FinalCollectionTable.bibcode != None))).order_by(models.FinalCollectionTable.created.desc()).first()
 
@@ -327,7 +351,6 @@ class SciXClassifierCelery(ADSCelery):
             logger.debug(f'Record list: {record_list}')
             return record_list
 
-
     def update_validated_records(self, run_id):
         """
         Updates the FinalCollectionTable to mark unvalidated records as validated 
@@ -362,5 +385,3 @@ class SciXClassifierCelery(ADSCelery):
         logger.debug(f'List of validated records: {record_list}')
         return record_list, success_list
  
-
-

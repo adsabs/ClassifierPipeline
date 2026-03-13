@@ -10,6 +10,7 @@ def _import_utilities(monkeypatch, base_fake_config, dummy_logger):
     module = importlib.import_module("ClassifierPipeline.utilities")
     monkeypatch.setattr(module, "config", dict(base_fake_config), raising=True)
     monkeypatch.setattr(module, "logger", dummy_logger, raising=True)
+    module.reset_output_buffers_for_tests()
     return module
 
 
@@ -64,9 +65,112 @@ def test_add_record_to_output_file_appends_row(monkeypatch, base_fake_config, du
         "output_path": str(output),
     }
     module.add_record_to_output_file(record)
+    module.flush_output_file(str(output))
     lines = output.read_text().strip().splitlines()
     assert len(lines) == 2
     assert lines[1].startswith("B\tS\tR\tTitle\tAstronomy, Other")
+
+
+def test_add_record_to_output_file_buffers_until_threshold(monkeypatch, base_fake_config, dummy_logger, tmp_path):
+    module = _import_utilities(monkeypatch, base_fake_config, dummy_logger)
+    output = tmp_path / "out.tsv"
+    module.prepare_output_file(str(output))
+    record = {
+        "bibcode": "B",
+        "scix_id": "S",
+        "run_id": "R",
+        "title": "Title",
+        "collections": ["Astronomy"],
+        "collection_scores": [0.61],
+        "scores": [0.61, 0.2, 0.4, 0.5, 0.1, 0.35, 0.21, 0.1],
+        "output_path": str(output),
+    }
+    for index in range(24):
+        current = dict(record, bibcode=f"B{index}")
+        module.add_record_to_output_file(current)
+    assert output.read_text().strip().splitlines() == [
+        "bibcode\tscix_id\trun_id\ttitle\tcollections\tcollection_scores\tastronomy_score\theliophysics_score\tplanetary_science_score\tearth_science_score\tbiology_score\tphysics_score\tother_score\tgarbage_score\toverride"
+    ]
+
+
+def test_add_record_to_output_file_flushes_at_threshold(monkeypatch, base_fake_config, dummy_logger, tmp_path):
+    module = _import_utilities(monkeypatch, base_fake_config, dummy_logger)
+    output = tmp_path / "out.tsv"
+    module.prepare_output_file(str(output))
+    record = {
+        "bibcode": "B",
+        "scix_id": "S",
+        "run_id": "R",
+        "title": "Title",
+        "collections": ["Astronomy"],
+        "collection_scores": [0.61],
+        "scores": [0.61, 0.2, 0.4, 0.5, 0.1, 0.35, 0.21, 0.1],
+        "output_path": str(output),
+    }
+    for index in range(25):
+        current = dict(record, bibcode=f"B{index}")
+        module.add_record_to_output_file(current)
+    assert len(output.read_text().strip().splitlines()) == 26
+
+
+def test_flush_output_file_flushes_remaining_rows(monkeypatch, base_fake_config, dummy_logger, tmp_path):
+    module = _import_utilities(monkeypatch, base_fake_config, dummy_logger)
+    output = tmp_path / "out.tsv"
+    module.prepare_output_file(str(output))
+    record = {
+        "bibcode": "B",
+        "scix_id": "S",
+        "run_id": "R",
+        "title": "Title",
+        "collections": ["Astronomy"],
+        "collection_scores": [0.61],
+        "scores": [0.61, 0.2, 0.4, 0.5, 0.1, 0.35, 0.21, 0.1],
+        "output_path": str(output),
+    }
+    module.add_record_to_output_file(record)
+    module.flush_output_file(str(output))
+    assert len(output.read_text().strip().splitlines()) == 2
+
+
+def test_prepare_output_file_resets_existing_buffer(monkeypatch, base_fake_config, dummy_logger, tmp_path):
+    module = _import_utilities(monkeypatch, base_fake_config, dummy_logger)
+    output = tmp_path / "out.tsv"
+    module.prepare_output_file(str(output))
+    record = {
+        "bibcode": "B",
+        "scix_id": "S",
+        "run_id": "R",
+        "title": "Title",
+        "collections": ["Astronomy"],
+        "collection_scores": [0.61],
+        "scores": [0.61, 0.2, 0.4, 0.5, 0.1, 0.35, 0.21, 0.1],
+        "output_path": str(output),
+    }
+    module.add_record_to_output_file(record)
+    module.prepare_output_file(str(output))
+    module.flush_output_file(str(output))
+    assert len(output.read_text().strip().splitlines()) == 1
+
+
+def test_buffering_is_isolated_per_output_path(monkeypatch, base_fake_config, dummy_logger, tmp_path):
+    module = _import_utilities(monkeypatch, base_fake_config, dummy_logger)
+    output_one = tmp_path / "one.tsv"
+    output_two = tmp_path / "two.tsv"
+    module.prepare_output_file(str(output_one))
+    module.prepare_output_file(str(output_two))
+    base_record = {
+        "scix_id": "S",
+        "run_id": "R",
+        "title": "Title",
+        "collections": ["Astronomy"],
+        "collection_scores": [0.61],
+        "scores": [0.61, 0.2, 0.4, 0.5, 0.1, 0.35, 0.21, 0.1],
+    }
+    module.add_record_to_output_file(dict(base_record, bibcode="B1", output_path=str(output_one)))
+    module.add_record_to_output_file(dict(base_record, bibcode="B2", output_path=str(output_two)))
+    module.flush_output_file(str(output_one))
+    assert len(output_one.read_text().strip().splitlines()) == 2
+    assert len(output_two.read_text().strip().splitlines()) == 1
 
 
 def test_check_is_allowed_category_true(monkeypatch, base_fake_config, dummy_logger):
