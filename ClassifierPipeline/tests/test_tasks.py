@@ -93,6 +93,7 @@ def test_task_update_record_creates_run_id_and_output_file(monkeypatch, base_fak
     assert calls["prepared"]
     assert calls["forwarded"][0][0]["text"] == "T A"
     assert calls["events"][0]["stage"] == "ingest_enqueue"
+    assert any(event["stage"] == "task_timing" and event["extra"]["name"] == "task_update_record" for event in calls["events"])
 
 
 def test_task_update_record_forwards_fixed_size_sub_batches(monkeypatch, base_fake_config, dummy_logger):
@@ -132,8 +133,9 @@ def test_task_update_record_emits_batch_enqueue_metric(monkeypatch, base_fake_co
             {"bibcode": "B3", "title": "T3", "abstract": "A3"},
         ]
     )
-    assert [event["extra"]["record_count"] for event in events] == [2, 1]
-    assert events[0]["record_id"] is None
+    enqueue_events = [event for event in events if event["stage"] == "ingest_enqueue"]
+    assert [event["extra"]["record_count"] for event in enqueue_events] == [2, 1]
+    assert enqueue_events[0]["record_id"] is None
 
 
 def test_task_update_record_reuses_existing_run_id(monkeypatch, base_fake_config, dummy_logger):
@@ -182,6 +184,7 @@ def test_task_send_input_record_to_classifier_real_inference(monkeypatch, base_f
     assert forwarded[0][0]["categories"] == ["Astronomy"]
     assert forwarded[0][0]["scores"] == [0.9]
     assert events[0]["stage"] == "classify"
+    assert any(event["stage"] == "task_timing" and event["extra"]["name"] == "task_send_input_record_to_classifier" for event in events)
 
 
 def test_task_send_input_record_to_classifier_real_inference_batch(monkeypatch, base_fake_config, dummy_logger):
@@ -317,8 +320,9 @@ def test_task_index_classified_record_processes_all_records_in_batch(monkeypatch
     module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
     module.utils.classifyRequestRecordList_to_list = lambda message: [dict(item) for item in message]
     indexed = []
+    events = []
     module.app.index_records_batch = lambda records: [(indexed.append(record["bibcode"]) or (record, "record_indexed")) for record in records]
-    module.perf_metrics.emit_event = lambda **kwargs: None
+    module.perf_metrics.emit_event = lambda **kwargs: events.append(kwargs)
     module.utils.add_record_to_output_file = lambda record: None
     module.task_index_classified_record(
         [
@@ -327,6 +331,7 @@ def test_task_index_classified_record_processes_all_records_in_batch(monkeypatch
         ]
     )
     assert indexed == ["B1", "B2"]
+    assert any(event["stage"] == "task_timing" and event["extra"]["name"] == "task_index_classified_record" for event in events)
 
 
 def test_task_index_classified_record_classify_path(monkeypatch, base_fake_config, dummy_logger):
@@ -439,7 +444,8 @@ def test_task_message_to_master_list_path(monkeypatch, base_fake_config, dummy_l
     module.perf_metrics.emit_event = lambda **kwargs: events.append(kwargs)
     module.task_message_to_master(payload)
     assert calls == [payload, payload]
-    assert len(events) == 2
+    forward_events = [event for event in events if event["stage"] == "forward"]
+    assert len(forward_events) == 2
 
 
 def test_task_resend_to_master_bibcode_path(monkeypatch, base_fake_config, dummy_logger):

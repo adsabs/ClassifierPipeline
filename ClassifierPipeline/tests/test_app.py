@@ -91,6 +91,16 @@ def test_index_run_adds_run_row_and_returns_id(monkeypatch, base_fake_config, du
     assert len(session.added) == 1
 
 
+def test_index_run_emits_app_timing(monkeypatch, base_fake_config, dummy_logger):
+    module = _import_app_module(monkeypatch, base_fake_config, dummy_logger)
+    session = FakeSession()
+    app = _new_app(module, session)
+    events = []
+    module.perf_metrics.emit_event = lambda **kwargs: events.append(kwargs)
+    app.index_run()
+    assert any(event["stage"] == "app_timing" and event["extra"]["name"] == "index_run" for event in events)
+
+
 def test_index_record_classify_path_creates_missing_rows(monkeypatch, base_fake_config, dummy_logger):
     module = _import_app_module(monkeypatch, base_fake_config, dummy_logger)
     queries = [
@@ -116,6 +126,31 @@ def test_index_record_classify_path_creates_missing_rows(monkeypatch, base_fake_
     assert session.commit_count == 1
     assert session.flush_count == 2
     assert len(session.added) >= 3
+
+
+def test_index_record_emits_app_timing(monkeypatch, base_fake_config, dummy_logger):
+    module = _import_app_module(monkeypatch, base_fake_config, dummy_logger)
+    queries = [
+        FakeQuery(first_result=None),
+        FakeQuery(first_result=types.SimpleNamespace(id=7, model_id=None)),
+        FakeQuery(first_result=None),
+        FakeQuery(first_result=None),
+        FakeQuery(first_result=None),
+    ]
+    session = FakeSession(queries)
+    app = _new_app(module, session)
+    events = []
+    module.perf_metrics.emit_event = lambda **kwargs: events.append(kwargs)
+    record = {
+        "run_id": 7,
+        "bibcode": "B",
+        "scix_id": None,
+        "collections": ["Astronomy"],
+        "scores": [0.9] * 8,
+        "operation_step": "classify",
+    }
+    app.index_record(record)
+    assert any(event["stage"] == "app_timing" and event["extra"]["name"] == "index_record" for event in events)
 
 
 def test_index_record_classify_path_reuses_existing_model(monkeypatch, base_fake_config, dummy_logger):
@@ -322,8 +357,8 @@ def test_index_records_batch_inserts_scores_and_final_rows_in_one_commit(monkeyp
     assert [status for _, status in results] == ["record_indexed", "record_indexed"]
     assert session.commit_count == 1
     assert session.flush_count == 2
-    assert events[0]["stage"] == "index_db"
-    assert events[0]["extra"]["record_count"] == 2
+    index_db_events = [event for event in events if event["stage"] == "index_db"]
+    assert index_db_events[0]["extra"]["record_count"] == 2
 
 
 def test_index_records_batch_reuses_existing_score_rows(monkeypatch, base_fake_config, dummy_logger):

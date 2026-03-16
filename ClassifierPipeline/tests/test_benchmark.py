@@ -1,4 +1,6 @@
 import json
+import sys
+import types
 from types import SimpleNamespace
 
 from ClassifierPipeline import benchmark
@@ -51,14 +53,12 @@ def test_run_case_includes_system_load(monkeypatch):
         def index_run(self):
             return 123
 
-    class DummyTasks:
-        app = DummyApp()
-        task_update_record = DummyTask()
+    dummy_tasks = types.ModuleType("ClassifierPipeline.tasks")
+    dummy_tasks.app = DummyApp()
+    dummy_tasks.task_update_record = DummyTask()
 
-    class DummyUtils:
-        @staticmethod
-        def list_to_ClassifyRequestRecordList(payload):
-            return payload
+    dummy_utils = types.ModuleType("ClassifierPipeline.utilities")
+    dummy_utils.list_to_ClassifyRequestRecordList = lambda payload: payload
 
     monkeypatch.setattr(benchmark, "_read_dataset", lambda path: [{"bibcode": "B", "title": "T", "abstract": "A"}])
     monkeypatch.setattr(benchmark, "_poll_run_completion", lambda **kwargs: {"complete": True, "records_indexed": 1, "elapsed_s": 1.0})
@@ -90,9 +90,11 @@ def test_run_case_includes_system_load(monkeypatch):
         },
     )
 
-    import sys
-    sys.modules["ClassifierPipeline.tasks"] = DummyTasks()
-    sys.modules["ClassifierPipeline.utilities"] = DummyUtils()
+    import ClassifierPipeline
+    monkeypatch.setitem(sys.modules, "ClassifierPipeline.tasks", dummy_tasks)
+    monkeypatch.setitem(sys.modules, "ClassifierPipeline.utilities", dummy_utils)
+    monkeypatch.setattr(ClassifierPipeline, "tasks", dummy_tasks, raising=False)
+    monkeypatch.setattr(ClassifierPipeline, "utilities", dummy_utils, raising=False)
 
     summary = benchmark._run_case(
         records_path="dataset.csv",
@@ -120,14 +122,12 @@ def test_run_case_disable_system_load(monkeypatch):
         def index_run(self):
             return 123
 
-    class DummyTasks:
-        app = DummyApp()
-        task_update_record = DummyTask()
+    dummy_tasks = types.ModuleType("ClassifierPipeline.tasks")
+    dummy_tasks.app = DummyApp()
+    dummy_tasks.task_update_record = DummyTask()
 
-    class DummyUtils:
-        @staticmethod
-        def list_to_ClassifyRequestRecordList(payload):
-            return payload
+    dummy_utils = types.ModuleType("ClassifierPipeline.utilities")
+    dummy_utils.list_to_ClassifyRequestRecordList = lambda payload: payload
 
     monkeypatch.setattr(benchmark, "_read_dataset", lambda path: [{"bibcode": "B", "title": "T", "abstract": "A"}])
     monkeypatch.setattr(benchmark, "_poll_run_completion", lambda **kwargs: {"complete": True, "records_indexed": 1, "elapsed_s": 1.0})
@@ -145,9 +145,11 @@ def test_run_case_disable_system_load(monkeypatch):
         },
     )
 
-    import sys
-    sys.modules["ClassifierPipeline.tasks"] = DummyTasks()
-    sys.modules["ClassifierPipeline.utilities"] = DummyUtils()
+    import ClassifierPipeline
+    monkeypatch.setitem(sys.modules, "ClassifierPipeline.tasks", dummy_tasks)
+    monkeypatch.setitem(sys.modules, "ClassifierPipeline.utilities", dummy_utils)
+    monkeypatch.setattr(ClassifierPipeline, "tasks", dummy_tasks, raising=False)
+    monkeypatch.setattr(ClassifierPipeline, "utilities", dummy_utils, raising=False)
 
     summary = benchmark._run_case(
         records_path="dataset.csv",

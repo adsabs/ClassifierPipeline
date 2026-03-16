@@ -10,6 +10,7 @@ import platform
 import re
 import subprocess
 import time
+from functools import wraps
 from contextlib import contextmanager
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -119,6 +120,72 @@ def timed_stage(
             config=config,
             path=path,
         )
+
+
+@contextmanager
+def timed_profile(
+    category: str,
+    name: str,
+    run_id: Optional[Any] = None,
+    record_id: Optional[str] = None,
+    status: str = "ok",
+    extra: Optional[dict] = None,
+    config: Optional[dict] = None,
+    path: Optional[str] = None,
+):
+    payload_extra = {"name": name}
+    if extra:
+        payload_extra.update(extra)
+    start = time.perf_counter()
+    outcome = status
+    try:
+        yield
+    except Exception:
+        outcome = "error"
+        raise
+    finally:
+        emit_event(
+            stage=category,
+            run_id=run_id,
+            record_id=record_id,
+            duration_ms=(time.perf_counter() - start) * 1000.0,
+            status=outcome,
+            extra=payload_extra,
+            config=config,
+            path=path,
+        )
+
+
+def profiled_function(
+    category: str,
+    name: Optional[str] = None,
+    run_id_getter=None,
+    record_id_getter=None,
+    extra_getter=None,
+    config_getter=None,
+):
+    def decorator(func):
+        profile_name = name or func.__name__
+
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            run_id = run_id_getter(*args, **kwargs) if run_id_getter else None
+            record_id = record_id_getter(*args, **kwargs) if record_id_getter else None
+            extra = extra_getter(*args, **kwargs) if extra_getter else None
+            config = config_getter(*args, **kwargs) if config_getter else None
+            with timed_profile(
+                category=category,
+                name=profile_name,
+                run_id=run_id,
+                record_id=record_id,
+                extra=extra,
+                config=config,
+            ):
+                return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
 
 
 def load_events(path: str, run_id: Optional[Any] = None) -> List[Dict[str, Any]]:
@@ -389,6 +456,8 @@ def aggregate_events(
     batch_latencies: Dict[str, List[float]] = {}
     batch_sizes: Dict[str, List[float]] = {}
     stage_errors: Dict[str, int] = {}
+    task_timings: Dict[str, List[float]] = {}
+    app_timings: Dict[str, List[float]] = {}
 
     submitted = 0
     indexed = 0
@@ -409,7 +478,13 @@ def aggregate_events(
         extra = event.get("extra", {}) or {}
         if duration is not None:
             duration_value = float(duration)
-            if stage in {"classify", "index_db"}:
+            if stage == "task_timing":
+                task_name = str(extra.get("name") or "unknown")
+                task_timings.setdefault(task_name, []).append(duration_value)
+            elif stage == "app_timing":
+                function_name = str(extra.get("name") or "unknown")
+                app_timings.setdefault(function_name, []).append(duration_value)
+            elif stage in {"classify", "index_db"}:
                 record_count = int(extra.get("record_count", 0) or 0)
                 normalized_duration = duration_value / record_count if record_count > 0 else duration_value
                 stages.setdefault(stage, []).append(normalized_duration)
@@ -465,6 +540,8 @@ def aggregate_events(
             "overall_records_per_minute": throughput,
         },
         "latency_ms": latency_ms,
+        "task_timing_ms": {name: _duration_stats(values) for name, values in task_timings.items()},
+        "app_timing_ms": {name: _duration_stats(values) for name, values in app_timings.items()},
         "batch_latency_ms": batch_latency_ms,
         "batch_sizes": batch_size_stats,
         "duration_s": {
@@ -562,6 +639,8 @@ def _fmt(value: Optional[float], places: int = 2) -> str:
 
 def render_markdown(summary: Dict[str, Any], output_path: str) -> None:
     latency = summary.get("latency_ms", {}) or {}
+    task_timing = summary.get("task_timing_ms", {}) or {}
+    app_timing = summary.get("app_timing_ms", {}) or {}
     batch_latency = summary.get("batch_latency_ms", {}) or {}
     batch_sizes = summary.get("batch_sizes", {}) or {}
     counts = summary.get("counts", {}) or {}
@@ -636,6 +715,52 @@ def render_markdown(summary: Dict[str, Any], output_path: str) -> None:
         f"- Highest p95 stage: `{slowest_stage or 'n/a'}` ({_fmt(slowest_p95)} ms)",
         "",
     ])
+
+    if task_timing:
+        lines.extend([
+            "## Task Timing (ms)",
+            "",
+            "| Task | Count | p50 | p95 | p99 | Mean | Min | Max |",
+            "|---|---:|---:|---:|---:|---:|---:|---:|",
+        ])
+        for name in sorted(task_timing.keys()):
+            stats = task_timing[name]
+            lines.append(
+                "| {name} | {count} | {p50} | {p95} | {p99} | {mean} | {min_v} | {max_v} |".format(
+                    name=name,
+                    count=stats.get("count", 0),
+                    p50=_fmt(stats.get("p50")),
+                    p95=_fmt(stats.get("p95")),
+                    p99=_fmt(stats.get("p99")),
+                    mean=_fmt(stats.get("mean")),
+                    min_v=_fmt(stats.get("min")),
+                    max_v=_fmt(stats.get("max")),
+                )
+            )
+        lines.append("")
+
+    if app_timing:
+        lines.extend([
+            "## App Function Timing (ms)",
+            "",
+            "| Function | Count | p50 | p95 | p99 | Mean | Min | Max |",
+            "|---|---:|---:|---:|---:|---:|---:|---:|",
+        ])
+        for name in sorted(app_timing.keys()):
+            stats = app_timing[name]
+            lines.append(
+                "| {name} | {count} | {p50} | {p95} | {p99} | {mean} | {min_v} | {max_v} |".format(
+                    name=name,
+                    count=stats.get("count", 0),
+                    p50=_fmt(stats.get("p50")),
+                    p95=_fmt(stats.get("p95")),
+                    p99=_fmt(stats.get("p99")),
+                    mean=_fmt(stats.get("mean")),
+                    min_v=_fmt(stats.get("min")),
+                    max_v=_fmt(stats.get("max")),
+                )
+            )
+        lines.append("")
 
     if batch_latency or batch_sizes:
         classify_batch_latency = batch_latency.get("classify", {}) or {}

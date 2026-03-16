@@ -16,6 +16,8 @@ def test_aggregate_events_counts_and_latency():
     events = [
         {"ts": 1.0, "stage": "ingest_enqueue", "duration_ms": 5.0, "status": "ok", "extra": {"record_count": 2}},
         {"ts": 2.0, "stage": "classify", "duration_ms": 15.0, "status": "ok", "extra": {}},
+        {"ts": 2.5, "stage": "task_timing", "duration_ms": 12.0, "status": "ok", "extra": {"name": "task_update_record"}},
+        {"ts": 2.6, "stage": "app_timing", "duration_ms": 8.0, "status": "ok", "extra": {"name": "index_run"}},
         {"ts": 3.0, "stage": "index", "duration_ms": 25.0, "status": "ok", "extra": {}},
         {"ts": 4.0, "stage": "forward", "duration_ms": 10.0, "status": "error", "extra": {}},
     ]
@@ -31,6 +33,8 @@ def test_aggregate_events_counts_and_latency():
     classify_stats = summary["latency_ms"]["classify"]
     assert classify_stats["count"] == 1
     assert classify_stats["p95"] == 15.0
+    assert summary["task_timing_ms"]["task_update_record"]["p95"] == 12.0
+    assert summary["app_timing_ms"]["index_run"]["p95"] == 8.0
 
 
 def test_aggregate_events_normalizes_batched_classify_latency():
@@ -177,6 +181,8 @@ def test_render_markdown_includes_system_load(tmp_path):
         "duration_s": {"wall_clock": 10.0},
         "counts": {"records_submitted": 10, "records_indexed": 10, "records_forwarded": 10, "failures": 0},
         "latency_ms": {},
+        "task_timing_ms": {"task_update_record": {"count": 1, "p50": 11.0, "p95": 11.0, "p99": 11.0, "mean": 11.0, "min": 11.0, "max": 11.0}},
+        "app_timing_ms": {"index_run": {"count": 1, "p50": 7.0, "p95": 7.0, "p99": 7.0, "mean": 7.0, "min": 7.0, "max": 7.0}},
         "batch_latency_ms": {"classify": {"mean": 25.0, "p95": 40.0}, "index_db": {"mean": 35.0, "p95": 50.0}},
         "batch_sizes": {"classify": {"mean": 100.0, "p95": 120.0}, "index_db": {"mean": 90.0, "p95": 110.0}},
         "system_load": {
@@ -194,4 +200,6 @@ def test_render_markdown_includes_system_load(tmp_path):
     content = output_path.read_text()
     assert "## System Load" in content
     assert "Load-Adjusted Throughput" in content
+    assert "## Task Timing (ms)" in content
+    assert "## App Function Timing (ms)" in content
     assert "## Batch Metrics" in content

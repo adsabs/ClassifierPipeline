@@ -106,98 +106,104 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
         run_id = request_list[0].get("run_id")
     else:
         run_id = app.index_run()
-    logger.info('Run ID: {}'.format(run_id))
 
-    if 'operation_step' in request_list[0]:
-        operation_step = request_list[0]['operation_step']
-    else:
-        operation_step = config.get('OPERATION_STEP', 'classify_verify')
+    with perf_metrics.timed_profile(
+        category="task_timing",
+        name="task_update_record",
+        run_id=run_id,
+        record_id=None,
+        extra={"record_count": len(request_list)},
+        config=config,
+    ):
+        logger.info('Run ID: {}'.format(run_id))
 
-    if 'output_path' in request_list[0]:
-        try:
-            filename = request_list[0]['output_path']
-            filename = filename.split('/')[-1]
-        except:
-            filename = request_list[0]['output_path']
-    else:
-        filename = ''
-
-    output_path = os.path.join(proj_home, 'logs', f'{filename}_{run_id}_classified.tsv')
-
-    utils.prepare_output_file(output_path)
-    logger.info('Prepared output file: {}'.format(output_path))
-
-    # Delay setting for testing
-    delay_message = config.get('DELAY_MESSAGE', False) 
-
-    logger.debug("Delay set for queue messages: {}".format(delay_message))
-
-
-    classify_batch_size = int(config.get("CLASSIFY_STAGE_BATCH_SIZE", 100) or 100)
-    if classify_batch_size <= 0:
-        classify_batch_size = 100
-
-    normalized_records = []
-    logger.debug('Request list: {}'.format(request_list))
-    for request in request_list:
-        logger.debug('Request: {}'.format(request))
-        record_bibcode = None
-        record_scix_id = None
-        if 'bibcode' in request:
-            record_bibcode = request['bibcode']
-        if 'scix_id' in request:
-            record_scix_id = request['scix_id']
-        if 'title' in request:
-            record_title = request['title']
+        if 'operation_step' in request_list[0]:
+            operation_step = request_list[0]['operation_step']
         else:
-            record_title = "None"
-        if 'abstract' in request:
-            record_abstract = request['abstract']
+            operation_step = config.get('OPERATION_STEP', 'classify_verify')
+
+        if 'output_path' in request_list[0]:
+            try:
+                filename = request_list[0]['output_path']
+                filename = filename.split('/')[-1]
+            except:
+                filename = request_list[0]['output_path']
         else:
-            record_abstract = "None"
-        record = {'bibcode': record_bibcode,
-                  'scix_id': record_scix_id,
-                  'title': record_title,
-                  'abstract': record_abstract,
-                  'text': record_title + ' ' + record_abstract,
-                  'operation_step': operation_step,
-                  'run_id': run_id,
-                  'output_format': output_format,
-                  'override': None,
-                  'output_path': output_path
-                  }
-        normalized_records.append(record)
+            filename = ''
 
-    for sub_batch in _chunk_records(normalized_records, classify_batch_size):
-        logger.debug("creating output message")
-        logger.debug(f"Records {sub_batch}")
-        out_message = utils.list_to_ClassifyRequestRecordList(sub_batch)
+        output_path = os.path.join(proj_home, 'logs', f'{filename}_{run_id}_classified.tsv')
 
-        logger.debug('Output Record type: {}'.format(type(out_message)))
-        logger.debug('Output Record: {}'.format(out_message))
-        enqueue_start = time.perf_counter()
-        if delay_message:
-            logger.debug('Using delay')
-            task_send_input_record_to_classifier.delay(out_message)
-        else:
-            task_send_input_record_to_classifier(out_message)  
-        enqueue_ms = (time.perf_counter() - enqueue_start) * 1000.0
-        perf_metrics.emit_event(
-            stage="ingest_enqueue",
-            run_id=run_id,
-            record_id=None,
-            duration_ms=enqueue_ms,
-            extra={
-                "record_count": len(sub_batch),
-                "delayed": bool(delay_message),
-                "pipeline": pipeline,
-                "batch_mode": True,
-                "batch_size": len(sub_batch),
-            },
-            config=config,
-        )
+        utils.prepare_output_file(output_path)
+        logger.info('Prepared output file: {}'.format(output_path))
 
-    return {"run_id": run_id, "records_submitted": len(request_list)}
+        delay_message = config.get('DELAY_MESSAGE', False)
+        logger.debug("Delay set for queue messages: {}".format(delay_message))
+
+        classify_batch_size = int(config.get("CLASSIFY_STAGE_BATCH_SIZE", 100) or 100)
+        if classify_batch_size <= 0:
+            classify_batch_size = 100
+
+        normalized_records = []
+        logger.debug('Request list: {}'.format(request_list))
+        for request in request_list:
+            logger.debug('Request: {}'.format(request))
+            record_bibcode = None
+            record_scix_id = None
+            if 'bibcode' in request:
+                record_bibcode = request['bibcode']
+            if 'scix_id' in request:
+                record_scix_id = request['scix_id']
+            if 'title' in request:
+                record_title = request['title']
+            else:
+                record_title = "None"
+            if 'abstract' in request:
+                record_abstract = request['abstract']
+            else:
+                record_abstract = "None"
+            record = {'bibcode': record_bibcode,
+                      'scix_id': record_scix_id,
+                      'title': record_title,
+                      'abstract': record_abstract,
+                      'text': record_title + ' ' + record_abstract,
+                      'operation_step': operation_step,
+                      'run_id': run_id,
+                      'output_format': output_format,
+                      'override': None,
+                      'output_path': output_path
+                      }
+            normalized_records.append(record)
+
+        for sub_batch in _chunk_records(normalized_records, classify_batch_size):
+            logger.debug("creating output message")
+            logger.debug(f"Records {sub_batch}")
+            out_message = utils.list_to_ClassifyRequestRecordList(sub_batch)
+
+            logger.debug('Output Record type: {}'.format(type(out_message)))
+            logger.debug('Output Record: {}'.format(out_message))
+            enqueue_start = time.perf_counter()
+            if delay_message:
+                logger.debug('Using delay')
+                task_send_input_record_to_classifier.delay(out_message)
+            else:
+                task_send_input_record_to_classifier(out_message)
+            enqueue_ms = (time.perf_counter() - enqueue_start) * 1000.0
+            perf_metrics.emit_event(
+                stage="ingest_enqueue",
+                run_id=run_id,
+                record_id=None,
+                duration_ms=enqueue_ms,
+                extra={
+                    "record_count": len(sub_batch),
+                    "delayed": bool(delay_message),
+                    "pipeline": pipeline,
+                    "batch_mode": True,
+                    "batch_size": len(sub_batch),
+                },
+                config=config,
+            )
+
+        return {"run_id": run_id, "records_submitted": len(request_list)}
             
 
 # @app.task(queue="unclassified-queue")
@@ -213,89 +219,95 @@ def task_send_input_record_to_classifier(message):
         message (ClassifyRequestRecordList): A single-item list with record data
     """
 
-    delay_message = config.get('DELAY_MESSAGE', False) 
-
-    logger.debug("Delay set for queue messages: {}".format(delay_message))
-
-    fake_data = config.get('FAKE_DATA', False)
-    forced_fake_data = os.getenv("PERF_FORCE_FAKE_DATA")
-    if forced_fake_data is not None:
-        fake_data = forced_fake_data.strip().lower() in {"1", "true", "yes", "on", "active"}
-
-    logger.debug("Fake data set for queue messages: {}".format(fake_data))
-
     records = utils.classifyRequestRecordList_to_list(message)
     if not records:
         return
     run_id = records[0].get("run_id")
+    with perf_metrics.timed_profile(
+        category="task_timing",
+        name="task_send_input_record_to_classifier",
+        run_id=run_id,
+        record_id=None,
+        extra={"record_count": len(records)},
+        config=config,
+    ):
+        delay_message = config.get('DELAY_MESSAGE', False)
+        logger.debug("Delay set for queue messages: {}".format(delay_message))
 
-    stage_start = time.perf_counter()
-    try:
-        processed_records = [None for _ in records]
-        real_positions = []
-        real_texts = []
+        fake_data = config.get('FAKE_DATA', False)
+        forced_fake_data = os.getenv("PERF_FORCE_FAKE_DATA")
+        if forced_fake_data is not None:
+            fake_data = forced_fake_data.strip().lower() in {"1", "true", "yes", "on", "active"}
 
-        for index, record in enumerate(records):
-            effective_fake_data = fake_data
-            if record.get("fake_data") is not None:
-                effective_fake_data = bool(record.get("fake_data"))
+        logger.debug("Fake data set for queue messages: {}".format(fake_data))
 
-            if effective_fake_data is False:
-                real_positions.append(index)
-                real_texts.append(record['title'] + ' ' + record['abstract'])
-            else:
-                processed_records[index] = utils.return_fake_data(record)
+        stage_start = time.perf_counter()
+        try:
+            processed_records = [None for _ in records]
+            real_positions = []
+            real_texts = []
 
-        if real_texts:
-            logger.debug('Performing Inference')
-            categories, scores = classifier.batch_score_SciX_categories(real_texts)
-            logger.debug('Categories: {}'.format(categories))
-            logger.debug('Allowed Categories: {}'.format(config['ALLOWED_CATEGORIES']))
-            logger.debug('Scores: {}'.format(scores))
-            for output_index, record_index in enumerate(real_positions):
-                record = records[record_index]
-                record['categories'] = categories[output_index]
-                record['scores'] = scores[output_index]
-                processed_records[record_index] = record
-        elif len(real_positions) == 0:
-            logger.info('Skipping inference - generating fake data')
+            for index, record in enumerate(records):
+                effective_fake_data = fake_data
+                if record.get("fake_data") is not None:
+                    effective_fake_data = bool(record.get("fake_data"))
 
-        for index, record in enumerate(processed_records):
-            logger.debug('RECORD: {}'.format(record))
-            processed_records[index] = utils.classify_record_from_scores(record)
+                if effective_fake_data is False:
+                    real_positions.append(index)
+                    real_texts.append(record['title'] + ' ' + record['abstract'])
+                else:
+                    processed_records[index] = utils.return_fake_data(record)
 
-        classify_status = "ok"
-    except Exception:
-        classify_status = "error"
-        raise
-    finally:
-        fake_record_count = sum(1 for record in records if (bool(record.get("fake_data")) if record.get("fake_data") is not None else fake_data))
-        perf_metrics.emit_event(
-            stage="classify",
-            run_id=run_id,
-            record_id=None,
-            duration_ms=(time.perf_counter() - stage_start) * 1000.0,
-            status=classify_status,
-            extra={
-                "fake_data": bool(fake_data),
-                "record_count": len(records),
-                "batch_size": len(records),
-                "real_record_count": len(records) - fake_record_count,
-                "fake_record_count": fake_record_count,
-                "batch_mode": True,
-            },
-            config=config,
-        )
+            if real_texts:
+                logger.debug('Performing Inference')
+                categories, scores = classifier.batch_score_SciX_categories(real_texts)
+                logger.debug('Categories: {}'.format(categories))
+                logger.debug('Allowed Categories: {}'.format(config['ALLOWED_CATEGORIES']))
+                logger.debug('Scores: {}'.format(scores))
+                for output_index, record_index in enumerate(real_positions):
+                    record = records[record_index]
+                    record['categories'] = categories[output_index]
+                    record['scores'] = scores[output_index]
+                    processed_records[record_index] = record
+            elif len(real_positions) == 0:
+                logger.info('Skipping inference - generating fake data')
 
-    logger.debug("Records after classification and thresholding: {}".format(processed_records))
-    logger.debug("Record Type: {}".format(type(processed_records)))
+            for index, record in enumerate(processed_records):
+                logger.debug('RECORD: {}'.format(record))
+                processed_records[index] = utils.classify_record_from_scores(record)
 
-    out_message = utils.list_to_ClassifyRequestRecordList(processed_records)
+            classify_status = "ok"
+        except Exception:
+            classify_status = "error"
+            raise
+        finally:
+            fake_record_count = sum(1 for record in records if (bool(record.get("fake_data")) if record.get("fake_data") is not None else fake_data))
+            perf_metrics.emit_event(
+                stage="classify",
+                run_id=run_id,
+                record_id=None,
+                duration_ms=(time.perf_counter() - stage_start) * 1000.0,
+                status=classify_status,
+                extra={
+                    "fake_data": bool(fake_data),
+                    "record_count": len(records),
+                    "batch_size": len(records),
+                    "real_record_count": len(records) - fake_record_count,
+                    "fake_record_count": fake_record_count,
+                    "batch_mode": True,
+                },
+                config=config,
+            )
 
-    if delay_message:
-        task_index_classified_record.delay(out_message)
-    else:
-        task_index_classified_record(out_message) 
+        logger.debug("Records after classification and thresholding: {}".format(processed_records))
+        logger.debug("Record Type: {}".format(type(processed_records)))
+
+        out_message = utils.list_to_ClassifyRequestRecordList(processed_records)
+
+        if delay_message:
+            task_index_classified_record.delay(out_message)
+        else:
+            task_index_classified_record(out_message)
 
 
 
@@ -312,65 +324,72 @@ def task_index_classified_record(message):
         message (ClassifyRequestRecordList): Classified record to store
     """
 
-    delay_message = config.get('DELAY_MESSAGE', False) 
-
-    logger.debug("Delay set for queue messages: {}".format(delay_message))
-
     records = utils.classifyRequestRecordList_to_list(message)
-    logger.debug(f"Record batch: {records}")
-    logger.debug(f'Record type: {type(message)}')
-    touched_output_paths = set()
-    results = []
-    if records and all(record.get("operation_step") in {"classify", "classify_verify"} for record in records):
-        results = app.index_records_batch(records)
-    else:
-        for record in records:
-            results.append(app.index_record(record))
+    run_id = records[0].get("run_id") if records else None
+    with perf_metrics.timed_profile(
+        category="task_timing",
+        name="task_index_classified_record",
+        run_id=run_id,
+        record_id=None,
+        extra={"record_count": len(records)},
+        config=config,
+    ):
+        delay_message = config.get('DELAY_MESSAGE', False)
+        logger.debug("Delay set for queue messages: {}".format(delay_message))
+        logger.debug(f"Record batch: {records}")
+        logger.debug(f'Record type: {type(message)}')
+        touched_output_paths = set()
+        results = []
+        if records and all(record.get("operation_step") in {"classify", "classify_verify"} for record in records):
+            results = app.index_records_batch(records)
+        else:
+            for record in records:
+                results.append(app.index_record(record))
 
-    for record, success in results:
-        record_id = _record_identifier(record)
+        for record, success in results:
+            record_id = _record_identifier(record)
 
-        stage_start = time.perf_counter()
-        try:
-            index_status = "ok"
-        except Exception:
-            index_status = "error"
-            raise
-        finally:
-            perf_metrics.emit_event(
-                stage="index",
-                run_id=record.get("run_id"),
-                record_id=record_id,
-                duration_ms=(time.perf_counter() - stage_start) * 1000.0,
-                status=index_status,
-                extra={"operation_step": record.get("operation_step")},
-                config=config,
-            )
-        logger.debug(f'Record: {record}, Success: {success}')
-        if success == "record_indexed":
-            if record['operation_step'] == 'classify_verify':
-                logger.info(f"Record {record_id} indexed")
-                utils.add_record_to_output_file(record)
-                if record.get("output_path"):
-                    touched_output_paths.add(record["output_path"])
-            if record['operation_step'] == 'classify':
-                logger.info(f"Record {record_id} indexed")
-                app.add_record_to_output_file(record)
-                if record.get("output_path"):
-                    touched_output_paths.add(record["output_path"])
+            stage_start = time.perf_counter()
+            try:
+                index_status = "ok"
+            except Exception:
+                index_status = "error"
+                raise
+            finally:
+                perf_metrics.emit_event(
+                    stage="index",
+                    run_id=record.get("run_id"),
+                    record_id=record_id,
+                    duration_ms=(time.perf_counter() - stage_start) * 1000.0,
+                    status=index_status,
+                    extra={"operation_step": record.get("operation_step")},
+                    config=config,
+                )
+            logger.debug(f'Record: {record}, Success: {success}')
+            if success == "record_indexed":
+                if record['operation_step'] == 'classify_verify':
+                    logger.info(f"Record {record_id} indexed")
+                    utils.add_record_to_output_file(record)
+                    if record.get("output_path"):
+                        touched_output_paths.add(record["output_path"])
+                if record['operation_step'] == 'classify':
+                    logger.info(f"Record {record_id} indexed")
+                    app.add_record_to_output_file(record)
+                    if record.get("output_path"):
+                        touched_output_paths.add(record["output_path"])
+                    resend_message = utils.list_to_ClassifyRequestRecordList([record])
+                    task_resend_to_master(resend_message)
+                    logger.info(f"Record {record_id} sent to master")
+
+            elif success == "record_validated":
                 resend_message = utils.list_to_ClassifyRequestRecordList([record])
                 task_resend_to_master(resend_message)
                 logger.info(f"Record {record_id} sent to master")
+            else:
+                logger.info(f"Record {record_id} failed to be indexed")
 
-        elif success == "record_validated":
-            resend_message = utils.list_to_ClassifyRequestRecordList([record])
-            task_resend_to_master(resend_message)
-            logger.info(f"Record {record_id} sent to master")
-        else:
-            logger.info(f"Record {record_id} failed to be indexed")
-
-    for output_path in touched_output_paths:
-        utils.flush_output_file(output_path)
+        for output_path in touched_output_paths:
+            utils.flush_output_file(output_path)
 
 def out_message(message):
     """
@@ -392,26 +411,17 @@ def task_message_to_master(message):
     Parameters:
         message (dict or list): A single record or list of classified records
     """
-
-    if isinstance(message, dict):
-        forward_start = time.perf_counter()
-        status = "ok"
-        try:
-            out_message(message)
-        except Exception:
-            status = "error"
-            raise
-        finally:
-            perf_metrics.emit_event(
-                stage="forward",
-                run_id=message.get("run_id"),
-                record_id=_record_identifier(message),
-                duration_ms=(time.perf_counter() - forward_start) * 1000.0,
-                status=status,
-                config=config,
-            )
-    if isinstance(message, list):
-        for msg in message:
+    run_id = message.get("run_id") if isinstance(message, dict) else (message[0].get("run_id") if message else None)
+    record_count = 1 if isinstance(message, dict) else len(message or [])
+    with perf_metrics.timed_profile(
+        category="task_timing",
+        name="task_message_to_master",
+        run_id=run_id,
+        record_id=None,
+        extra={"record_count": record_count},
+        config=config,
+    ):
+        if isinstance(message, dict):
             forward_start = time.perf_counter()
             status = "ok"
             try:
@@ -422,12 +432,30 @@ def task_message_to_master(message):
             finally:
                 perf_metrics.emit_event(
                     stage="forward",
-                    run_id=msg.get("run_id"),
-                    record_id=_record_identifier(msg),
+                    run_id=message.get("run_id"),
+                    record_id=_record_identifier(message),
                     duration_ms=(time.perf_counter() - forward_start) * 1000.0,
                     status=status,
                     config=config,
                 )
+        if isinstance(message, list):
+            for msg in message:
+                forward_start = time.perf_counter()
+                status = "ok"
+                try:
+                    out_message(message)
+                except Exception:
+                    status = "error"
+                    raise
+                finally:
+                    perf_metrics.emit_event(
+                        stage="forward",
+                        run_id=msg.get("run_id"),
+                        record_id=_record_identifier(msg),
+                        duration_ms=(time.perf_counter() - forward_start) * 1000.0,
+                        status=status,
+                        config=config,
+                    )
 
 # @app.task(queue="classify-record")
 @app.task(queue="send-record-to-master")
@@ -438,31 +466,38 @@ def task_resend_to_master(message):
     Parameters:
         message (ClassifyRequestRecordList): Message containing one record
     """
-
-    logger.info(f"Resending records to master")
-
     request_list = utils.classifyRequestRecordList_to_list(message)
+    run_id = request_list[0].get("run_id") if request_list else None
+    with perf_metrics.timed_profile(
+        category="task_timing",
+        name="task_resend_to_master",
+        run_id=run_id,
+        record_id=None,
+        extra={"record_count": len(request_list)},
+        config=config,
+    ):
+        logger.info(f"Resending records to master")
 
-    logger.debug('Request list: {}'.format(request_list))
-    for request in request_list:
-        logger.info('Request: {}'.format(request))
+        logger.debug('Request list: {}'.format(request_list))
+        for request in request_list:
+            logger.info('Request: {}'.format(request))
 
-        if 'bibcode' in request:
-            record_id = request['bibcode']
-            record_list = app.query_final_collection_table(bibcode=request['bibcode'])
-        elif 'scix_id' in request:
-            record_list = app.query_final_collection_table(scix_id=request['scix_id'])
-        elif 'run_id' in request:
-            record_list = app.query_final_collection_table(run_id=request['run_id'])
+            if 'bibcode' in request:
+                record_id = request['bibcode']
+                record_list = app.query_final_collection_table(bibcode=request['bibcode'])
+            elif 'scix_id' in request:
+                record_list = app.query_final_collection_table(scix_id=request['scix_id'])
+            elif 'run_id' in request:
+                record_list = app.query_final_collection_table(run_id=request['run_id'])
 
-        for record in record_list:
-            record_id = None
-            if 'scix_id' in record:
-                record_id = record['scix_id']
-            if 'bibcode' in record:
-                record_id = record['bibcode']
-            logger.info(f"Sending record {record_id} to master")
-            task_message_to_master(record)
+            for record in record_list:
+                record_id = None
+                if 'scix_id' in record:
+                    record_id = record['scix_id']
+                if 'bibcode' in record:
+                    record_id = record['bibcode']
+                logger.info(f"Sending record {record_id} to master")
+                task_message_to_master(record)
 
 
 # @app.task(queue="classify-record")
@@ -474,21 +509,28 @@ def task_update_validated_records(message):
     Parameters:
         message (ClassifyRequestRecordList): Message with run_id field
     """
-
-    logger.info(f"Updating validated records")
     record = utils.classifyRequestRecordList_to_list(message)[0]
-    record_list, success_list = app.update_validated_records(record['run_id'])
-    for record, success in zip(record_list, success_list):
-        logger.debug(f"Record: {record}")
-        logger.debug(f"Success: {success}")
-        if success == "success":
-            record_id = None
-            if 'scix_id' in record:
-                record_id = record['scix_id']
-            if 'bibcode' in record:
-                record_id = record['bibcode']
-            logger.info(f"Sending record {record_id} to master")
-            task_message_to_master(record)
+    with perf_metrics.timed_profile(
+        category="task_timing",
+        name="task_update_validated_records",
+        run_id=record.get("run_id"),
+        record_id=None,
+        extra={"record_count": 1},
+        config=config,
+    ):
+        logger.info(f"Updating validated records")
+        record_list, success_list = app.update_validated_records(record['run_id'])
+        for record, success in zip(record_list, success_list):
+            logger.debug(f"Record: {record}")
+            logger.debug(f"Success: {success}")
+            if success == "success":
+                record_id = None
+                if 'scix_id' in record:
+                    record_id = record['scix_id']
+                if 'bibcode' in record:
+                    record_id = record['bibcode']
+                logger.info(f"Sending record {record_id} to master")
+                task_message_to_master(record)
 
 
 # @app.task(queue="output-results")
@@ -501,11 +543,18 @@ def task_output_results(message):
     Parameters:
         message (dict): Record containing bibcode, scix_id, and collections
     """
-
     record = utils.message_to_list(message)[0]
-    logger.debug('Output results ')
-    logger.debug(f'Record being output {message}')
-    app.add_record_to_output_file(record)
+    with perf_metrics.timed_profile(
+        category="task_timing",
+        name="task_output_results",
+        run_id=record.get("run_id"),
+        record_id=_record_identifier(record),
+        extra={"record_count": 1},
+        config=config,
+    ):
+        logger.debug('Output results ')
+        logger.debug(f'Record being output {message}')
+        app.add_record_to_output_file(record)
 
 
 
