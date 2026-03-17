@@ -1,4 +1,5 @@
 import json
+import importlib
 from types import SimpleNamespace
 
 import pytest
@@ -35,6 +36,38 @@ def test_aggregate_events_counts_and_latency():
     assert classify_stats["p95"] == 15.0
     assert summary["task_timing_ms"]["task_update_record"]["p95"] == 12.0
     assert summary["app_timing_ms"]["index_run"]["p95"] == 8.0
+
+
+def test_emit_event_uses_registered_run_metrics_context(tmp_path, monkeypatch):
+    importlib.reload(perf_metrics)
+    context_dir = tmp_path / "context"
+    events_path = tmp_path / "events.jsonl"
+    config = {"PERF_METRICS_ENABLED": False, "PERF_METRICS_CONTEXT_DIR": str(context_dir)}
+    monkeypatch.setenv("PERF_METRICS_CONTEXT_DIR", str(context_dir))
+    monkeypatch.delenv("PERF_METRICS_PATH", raising=False)
+    monkeypatch.delenv("PERF_METRICS_ENABLED", raising=False)
+
+    perf_metrics.register_run_metrics_context(
+        run_id=123,
+        enabled=True,
+        path=str(events_path),
+        config=config,
+        context_dir=str(context_dir),
+    )
+    perf_metrics.emit_event(
+        stage="task_timing",
+        run_id=123,
+        record_id=None,
+        duration_ms=12.5,
+        extra={"name": "task_update_record"},
+        config=config,
+    )
+
+    resolved = perf_metrics.resolve_run_metrics_context(123, config=config)
+    payloads = perf_metrics.load_events(str(resolved["path"]), run_id=123)
+    assert len(payloads) == 1
+    assert payloads[0]["stage"] == "task_timing"
+    assert payloads[0]["extra"]["name"] == "task_update_record"
 
 
 def test_aggregate_events_normalizes_batched_classify_latency():

@@ -47,6 +47,72 @@ def metrics_path(config: Optional[dict] = None) -> Optional[str]:
     return None
 
 
+def metrics_context_dir(config: Optional[dict] = None) -> Optional[str]:
+    env_dir = os.getenv("PERF_METRICS_CONTEXT_DIR")
+    if env_dir:
+        return env_dir
+    if config is not None:
+        config_dir = config.get("PERF_METRICS_CONTEXT_DIR")
+        if config_dir:
+            return config_dir
+    base_path = metrics_path(config=config)
+    if base_path:
+        return os.path.join(os.path.dirname(base_path), "perf_run_context")
+    return None
+
+
+def _run_context_path(run_id: Any, config: Optional[dict] = None, context_dir: Optional[str] = None) -> Optional[str]:
+    if run_id is None:
+        return None
+    directory = context_dir or metrics_context_dir(config=config)
+    if not directory:
+        return None
+    return os.path.join(directory, f"run_{run_id}.json")
+
+
+def register_run_metrics_context(
+    run_id: Any,
+    enabled: bool,
+    path: Optional[str],
+    config: Optional[dict] = None,
+    context_dir: Optional[str] = None,
+) -> None:
+    try:
+        target = _run_context_path(run_id, config=config, context_dir=context_dir)
+        if not target:
+            return
+        directory = os.path.dirname(target)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+        with open(target, "w") as handle:
+            json.dump(
+                {
+                    "enabled": bool(enabled),
+                    "path": path,
+                    "updated_at": time.time(),
+                },
+                handle,
+                sort_keys=True,
+            )
+    except Exception:
+        return
+
+
+def resolve_run_metrics_context(run_id: Any, config: Optional[dict] = None) -> Dict[str, Any]:
+    target = _run_context_path(run_id, config=config)
+    if not target or not os.path.exists(target):
+        return {"enabled": None, "path": None}
+    try:
+        with open(target, "r") as handle:
+            payload = json.load(handle)
+        return {
+            "enabled": payload.get("enabled"),
+            "path": payload.get("path"),
+        }
+    except Exception:
+        return {"enabled": None, "path": None}
+
+
 def emit_event(
     stage: str,
     run_id: Optional[Any] = None,
@@ -62,10 +128,14 @@ def emit_event(
     This function is intentionally best-effort and will never raise.
     """
     try:
-        if not metrics_enabled(config=config):
+        run_context = resolve_run_metrics_context(run_id, config=config) if run_id is not None else {"enabled": None, "path": None}
+        enabled = metrics_enabled(config=config)
+        if run_context.get("enabled") is not None:
+            enabled = bool(run_context.get("enabled"))
+        if not enabled:
             return
 
-        target_path = path or metrics_path(config=config)
+        target_path = path or run_context.get("path") or metrics_path(config=config)
         if not target_path:
             return
 

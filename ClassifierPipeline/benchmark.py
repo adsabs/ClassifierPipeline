@@ -136,10 +136,14 @@ def _run_case(
 ) -> Dict[str, object]:
     import ClassifierPipeline.tasks as tasks
     import ClassifierPipeline.utilities as utils
+    config = load_config(proj_home=os.path.realpath(os.path.join(os.path.dirname(__file__), "../")))
+    context_dir = perf_metrics.metrics_context_dir(config=config)
 
     # Profiling flags consumed by task workers.
     os.environ["PERF_METRICS_ENABLED"] = "true"
     os.environ["PERF_METRICS_PATH"] = events_path
+    if context_dir:
+        os.environ["PERF_METRICS_CONTEXT_DIR"] = context_dir
     os.environ["PERF_FORCE_FAKE_DATA"] = "true" if mode == "fake" else "false"
 
     records = _read_dataset(records_path)
@@ -147,6 +151,13 @@ def _run_case(
         raise RuntimeError(f"No valid records found in dataset: {records_path}")
 
     run_id = tasks.app.index_run()
+    perf_metrics.register_run_metrics_context(
+        run_id=run_id,
+        enabled=True,
+        path=events_path,
+        config=config,
+        context_dir=context_dir,
+    )
     submitted = 0
     system_samples: List[Dict[str, object]] = []
     sampler_stop = threading.Event()
