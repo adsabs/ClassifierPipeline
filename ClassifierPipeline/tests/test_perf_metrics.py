@@ -55,23 +55,44 @@ def test_emit_event_uses_registered_run_metrics_context(tmp_path, monkeypatch):
         run_id=123,
         enabled=True,
         path=str(events_path),
+        context_id="ctx-1",
         config=config,
         context_dir=str(context_dir),
     )
     perf_metrics.emit_event(
         stage="task_timing",
         run_id=123,
+        context_id="ctx-1",
         record_id=None,
         duration_ms=12.5,
         extra={"name": "task_update_record"},
         config=config,
     )
 
-    resolved = perf_metrics.resolve_run_metrics_context(123, config=config)
-    payloads = perf_metrics.load_events(str(resolved["path"]), run_id=123)
+    resolved = perf_metrics.resolve_run_metrics_context(123, config=config, context_id="ctx-1")
+    payloads = perf_metrics.load_events(str(resolved["path"]), run_id=123, context_id="ctx-1")
     assert len(payloads) == 1
     assert payloads[0]["stage"] == "task_timing"
     assert payloads[0]["extra"]["name"] == "task_update_record"
+    assert payloads[0]["context_id"] == "ctx-1"
+
+
+def test_load_events_filters_by_context_id(tmp_path):
+    path = tmp_path / "events.jsonl"
+    path.write_text(
+        "\n".join(
+            [
+                json.dumps({"stage": "classify", "run_id": "1", "context_id": "ctx-a"}),
+                json.dumps({"stage": "classify", "run_id": "1", "context_id": "ctx-b"}),
+                json.dumps({"stage": "classify", "run_id": "2", "context_id": "ctx-a"}),
+            ]
+        )
+        + "\n"
+    )
+
+    payloads = perf_metrics.load_events(str(path), run_id=1, context_id="ctx-a")
+    assert len(payloads) == 1
+    assert payloads[0]["context_id"] == "ctx-a"
 
 
 def test_aggregate_events_normalizes_batched_classify_latency():

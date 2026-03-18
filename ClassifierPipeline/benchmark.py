@@ -13,6 +13,7 @@ import os
 import subprocess
 import threading
 import time
+import uuid
 from datetime import datetime, timezone
 from typing import Dict, Iterable, List, Optional
 
@@ -97,13 +98,19 @@ def _chunks(items: List[dict], chunk_size: int) -> Iterable[List[dict]]:
         yield items[index:index + chunk_size]
 
 
-def _poll_run_completion(run_id: int, expected_records: int, timeout_s: int, poll_interval_s: float) -> Dict[str, object]:
+def _poll_run_completion(
+    run_id: int,
+    expected_records: int,
+    timeout_s: int,
+    poll_interval_s: float,
+    perf_metrics_context_id: Optional[str] = None,
+) -> Dict[str, object]:
     import ClassifierPipeline.tasks as tasks
 
     start = time.time()
     last_indexed = 0
     while (time.time() - start) < timeout_s:
-        records = tasks.app.query_final_collection_table(run_id=run_id)
+        records = tasks.app.query_final_collection_table(run_id=run_id, perf_metrics_context_id=perf_metrics_context_id)
         indexed = len(records)
         last_indexed = indexed
         if indexed >= expected_records:
@@ -150,11 +157,13 @@ def _run_case(
     if not records:
         raise RuntimeError(f"No valid records found in dataset: {records_path}")
 
-    run_id = tasks.app.index_run()
+    metrics_context_id = uuid.uuid4().hex
+    run_id = tasks.app.index_run(perf_metrics_context_id=metrics_context_id)
     perf_metrics.register_run_metrics_context(
         run_id=run_id,
         enabled=True,
         path=events_path,
+        context_id=metrics_context_id,
         config=config,
         context_dir=context_dir,
     )
@@ -180,6 +189,7 @@ def _run_case(
                 item = dict(record)
                 item["run_id"] = run_id
                 item["operation_step"] = operation_step
+                item["perf_metrics_context_id"] = metrics_context_id
                 payload.append(item)
 
             message = utils.list_to_ClassifyRequestRecordList(payload)
@@ -191,6 +201,7 @@ def _run_case(
             expected_records=submitted,
             timeout_s=timeout_s,
             poll_interval_s=poll_interval_s,
+            perf_metrics_context_id=metrics_context_id,
         )
         end_wall = time.time()
     finally:
@@ -200,7 +211,7 @@ def _run_case(
                 sampler_thread.join(timeout=max(0.1, system_sample_interval_s))
             system_samples.append(perf_metrics.collect_system_sample())
 
-    events = perf_metrics.load_events(events_path, run_id=run_id)
+    events = perf_metrics.load_events(events_path, run_id=run_id, context_id=metrics_context_id)
     summary = perf_metrics.aggregate_events(
         events,
         started_at=start_wall,
@@ -219,6 +230,7 @@ def _run_case(
         "queue_names": queue_names,
         "git_commit": _safe_git_commit(),
         "timestamp_utc": _utc_timestamp(),
+        "perf_metrics_context_id": metrics_context_id,
     }
 
     summary["counts"]["records_submitted"] = submitted

@@ -61,12 +61,19 @@ def metrics_context_dir(config: Optional[dict] = None) -> Optional[str]:
     return None
 
 
-def _run_context_path(run_id: Any, config: Optional[dict] = None, context_dir: Optional[str] = None) -> Optional[str]:
+def _run_context_path(
+    run_id: Any,
+    config: Optional[dict] = None,
+    context_dir: Optional[str] = None,
+    context_id: Optional[str] = None,
+) -> Optional[str]:
     if run_id is None:
         return None
     directory = context_dir or metrics_context_dir(config=config)
     if not directory:
         return None
+    if context_id:
+        return os.path.join(directory, f"run_{run_id}_{context_id}.json")
     return os.path.join(directory, f"run_{run_id}.json")
 
 
@@ -74,11 +81,12 @@ def register_run_metrics_context(
     run_id: Any,
     enabled: bool,
     path: Optional[str],
+    context_id: Optional[str] = None,
     config: Optional[dict] = None,
     context_dir: Optional[str] = None,
 ) -> None:
     try:
-        target = _run_context_path(run_id, config=config, context_dir=context_dir)
+        target = _run_context_path(run_id, config=config, context_dir=context_dir, context_id=context_id)
         if not target:
             return
         directory = os.path.dirname(target)
@@ -89,6 +97,7 @@ def register_run_metrics_context(
                 {
                     "enabled": bool(enabled),
                     "path": path,
+                    "context_id": context_id,
                     "updated_at": time.time(),
                 },
                 handle,
@@ -98,8 +107,15 @@ def register_run_metrics_context(
         return
 
 
-def resolve_run_metrics_context(run_id: Any, config: Optional[dict] = None) -> Dict[str, Any]:
-    target = _run_context_path(run_id, config=config)
+def resolve_run_metrics_context(
+    run_id: Any,
+    config: Optional[dict] = None,
+    context_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    target = _run_context_path(run_id, config=config, context_id=context_id)
+    if not target or not os.path.exists(target):
+        if context_id is not None:
+            target = _run_context_path(run_id, config=config)
     if not target or not os.path.exists(target):
         return {"enabled": None, "path": None}
     try:
@@ -108,14 +124,16 @@ def resolve_run_metrics_context(run_id: Any, config: Optional[dict] = None) -> D
         return {
             "enabled": payload.get("enabled"),
             "path": payload.get("path"),
+            "context_id": payload.get("context_id"),
         }
     except Exception:
-        return {"enabled": None, "path": None}
+        return {"enabled": None, "path": None, "context_id": None}
 
 
 def emit_event(
     stage: str,
     run_id: Optional[Any] = None,
+    context_id: Optional[str] = None,
     record_id: Optional[str] = None,
     duration_ms: Optional[float] = None,
     status: str = "ok",
@@ -128,7 +146,11 @@ def emit_event(
     This function is intentionally best-effort and will never raise.
     """
     try:
-        run_context = resolve_run_metrics_context(run_id, config=config) if run_id is not None else {"enabled": None, "path": None}
+        run_context = (
+            resolve_run_metrics_context(run_id, config=config, context_id=context_id)
+            if run_id is not None
+            else {"enabled": None, "path": None, "context_id": None}
+        )
         enabled = metrics_enabled(config=config)
         if run_context.get("enabled") is not None:
             enabled = bool(run_context.get("enabled"))
@@ -143,6 +165,7 @@ def emit_event(
             "ts": time.time(),
             "stage": stage,
             "run_id": str(run_id) if run_id is not None else None,
+            "context_id": context_id,
             "record_id": record_id,
             "duration_ms": float(duration_ms) if duration_ms is not None else None,
             "status": status,
@@ -165,6 +188,7 @@ def emit_event(
 def timed_stage(
     stage: str,
     run_id: Optional[Any] = None,
+    context_id: Optional[str] = None,
     record_id: Optional[str] = None,
     status: str = "ok",
     extra: Optional[dict] = None,
@@ -183,6 +207,7 @@ def timed_stage(
         emit_event(
             stage=stage,
             run_id=run_id,
+            context_id=context_id,
             record_id=record_id,
             duration_ms=duration_ms,
             status=outcome,
@@ -197,6 +222,7 @@ def timed_profile(
     category: str,
     name: str,
     run_id: Optional[Any] = None,
+    context_id: Optional[str] = None,
     record_id: Optional[str] = None,
     status: str = "ok",
     extra: Optional[dict] = None,
@@ -217,6 +243,7 @@ def timed_profile(
         emit_event(
             stage=category,
             run_id=run_id,
+            context_id=context_id,
             record_id=record_id,
             duration_ms=(time.perf_counter() - start) * 1000.0,
             status=outcome,
@@ -230,6 +257,7 @@ def profiled_function(
     category: str,
     name: Optional[str] = None,
     run_id_getter=None,
+    context_id_getter=None,
     record_id_getter=None,
     extra_getter=None,
     config_getter=None,
@@ -240,6 +268,7 @@ def profiled_function(
         @wraps(func)
         def wrapper(*args, **kwargs):
             run_id = run_id_getter(*args, **kwargs) if run_id_getter else None
+            context_id = context_id_getter(*args, **kwargs) if context_id_getter else None
             record_id = record_id_getter(*args, **kwargs) if record_id_getter else None
             extra = extra_getter(*args, **kwargs) if extra_getter else None
             config = config_getter(*args, **kwargs) if config_getter else None
@@ -247,6 +276,7 @@ def profiled_function(
                 category=category,
                 name=profile_name,
                 run_id=run_id,
+                context_id=context_id,
                 record_id=record_id,
                 extra=extra,
                 config=config,
@@ -258,11 +288,12 @@ def profiled_function(
     return decorator
 
 
-def load_events(path: str, run_id: Optional[Any] = None) -> List[Dict[str, Any]]:
+def load_events(path: str, run_id: Optional[Any] = None, context_id: Optional[str] = None) -> List[Dict[str, Any]]:
     if not path or not os.path.exists(path):
         return []
 
     run_id_str = str(run_id) if run_id is not None else None
+    context_id_str = str(context_id) if context_id is not None else None
     output: List[Dict[str, Any]] = []
 
     with open(path, "r") as handle:
@@ -275,6 +306,8 @@ def load_events(path: str, run_id: Optional[Any] = None) -> List[Dict[str, Any]]
             except Exception:
                 continue
             if run_id_str is not None and str(payload.get("run_id")) != run_id_str:
+                continue
+            if context_id_str is not None and str(payload.get("context_id")) != context_id_str:
                 continue
             output.append(payload)
 

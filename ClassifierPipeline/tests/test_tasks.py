@@ -17,7 +17,7 @@ def _import_tasks_module(monkeypatch, base_fake_config, dummy_logger):
     fake_app_instance = types.SimpleNamespace(
         exchange="exchange",
         conf=types.SimpleNamespace(CELERY_QUEUES=()),
-        index_run=lambda: "RUNID",
+        index_run=lambda *args, **kwargs: "RUNID",
         index_record=lambda record: (record, "record_indexed"),
         index_records_batch=lambda records: [(record, "record_indexed") for record in records],
         add_record_to_output_file=lambda record: None,
@@ -83,7 +83,7 @@ def test_record_identifier_uses_bibcode_fallback(monkeypatch, base_fake_config, 
 def test_task_update_record_creates_run_id_and_output_file(monkeypatch, base_fake_config, dummy_logger):
     module, fake_app = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
     calls = {"prepared": [], "forwarded": [], "events": []}
-    module.app.index_run = lambda: "RUNID"
+    module.app.index_run = lambda *args, **kwargs: "RUNID"
     module.utils.prepare_output_file = lambda path: calls["prepared"].append(path)
     module.utils.classifyRequestRecordList_to_list = lambda message: [dict(message)]
     module.utils.list_to_ClassifyRequestRecordList = lambda payload: payload

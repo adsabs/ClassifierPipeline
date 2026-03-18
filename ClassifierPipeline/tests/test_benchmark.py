@@ -50,7 +50,7 @@ def test_run_case_includes_system_load(monkeypatch):
             return None
 
     class DummyApp:
-        def index_run(self):
+        def index_run(self, perf_metrics_context_id=None):
             return 123
 
     dummy_tasks = types.ModuleType("ClassifierPipeline.tasks")
@@ -62,7 +62,7 @@ def test_run_case_includes_system_load(monkeypatch):
 
     monkeypatch.setattr(benchmark, "_read_dataset", lambda path: [{"bibcode": "B", "title": "T", "abstract": "A"}])
     monkeypatch.setattr(benchmark, "_poll_run_completion", lambda **kwargs: {"complete": True, "records_indexed": 1, "elapsed_s": 1.0})
-    monkeypatch.setattr(benchmark.perf_metrics, "load_events", lambda path, run_id=None: [])
+    monkeypatch.setattr(benchmark.perf_metrics, "load_events", lambda path, run_id=None, context_id=None: [])
     monkeypatch.setattr(
         benchmark.perf_metrics,
         "aggregate_events",
@@ -119,7 +119,7 @@ def test_run_case_disable_system_load(monkeypatch):
             return None
 
     class DummyApp:
-        def index_run(self):
+        def index_run(self, perf_metrics_context_id=None):
             return 123
 
     dummy_tasks = types.ModuleType("ClassifierPipeline.tasks")
@@ -131,7 +131,7 @@ def test_run_case_disable_system_load(monkeypatch):
 
     monkeypatch.setattr(benchmark, "_read_dataset", lambda path: [{"bibcode": "B", "title": "T", "abstract": "A"}])
     monkeypatch.setattr(benchmark, "_poll_run_completion", lambda **kwargs: {"complete": True, "records_indexed": 1, "elapsed_s": 1.0})
-    monkeypatch.setattr(benchmark.perf_metrics, "load_events", lambda path, run_id=None: [])
+    monkeypatch.setattr(benchmark.perf_metrics, "load_events", lambda path, run_id=None, context_id=None: [])
     monkeypatch.setattr(
         benchmark.perf_metrics,
         "aggregate_events",

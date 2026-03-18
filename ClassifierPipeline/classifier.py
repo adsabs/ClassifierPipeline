@@ -101,11 +101,12 @@ class Classifier:
         return(split_input_ids_with_tokens)
 
         
-    def _emit_classifier_shape_metrics(self, run_id, configured_record_batch_size, shape_metrics):
+    def _emit_classifier_shape_metrics(self, run_id, context_id, configured_record_batch_size, shape_metrics):
         for name, value in shape_metrics.items():
             perf_metrics.emit_event(
                 stage="classifier_batch_shape",
                 run_id=run_id,
+                context_id=context_id,
                 record_id=None,
                 duration_ms=float(value),
                 extra={"name": name},
@@ -120,6 +121,7 @@ class Classifier:
         window_size=510,
         window_stride=500,
         run_id=None,
+        context_id=None,
         configured_record_batch_size=None,
     ):
         """
@@ -153,6 +155,7 @@ class Classifier:
             category="classifier_timing",
             name="tokenizer_call",
             run_id=run_id,
+            context_id=context_id,
             record_id=None,
             extra={"configured_record_batch_size": configured_batch_size, "record_count": len(list_of_texts)},
             config=config,
@@ -166,6 +169,7 @@ class Classifier:
             category="classifier_timing",
             name="input_splitting",
             run_id=run_id,
+            context_id=context_id,
             record_id=None,
             extra={"configured_record_batch_size": configured_batch_size, "record_count": len(list_of_texts)},
             config=config,
@@ -179,6 +183,7 @@ class Classifier:
             category="classifier_timing",
             name="special_token_padding",
             run_id=run_id,
+            context_id=context_id,
             record_id=None,
             extra={"configured_record_batch_size": configured_batch_size, "record_count": len(list_of_texts)},
             config=config,
@@ -196,6 +201,7 @@ class Classifier:
         padded_tensor_cols = max((len(split_ids[0]) for split_ids in list_of_split_input_ids_with_tokens if split_ids), default=0)
         self._emit_classifier_shape_metrics(
             run_id,
+            context_id,
             configured_batch_size,
             {
                 "configured_record_batch_size": configured_batch_size,
@@ -262,6 +268,7 @@ class Classifier:
         perf_metrics.emit_event(
             stage="classifier_timing",
             run_id=run_id,
+            context_id=context_id,
             record_id=None,
             duration_ms=model_forward_ms,
             extra={"name": "model_forward", "configured_record_batch_size": configured_batch_size, "record_count": len(list_of_texts)},
@@ -270,6 +277,7 @@ class Classifier:
         perf_metrics.emit_event(
             stage="classifier_timing",
             run_id=run_id,
+            context_id=context_id,
             record_id=None,
             duration_ms=post_sigmoid_aggregation_ms,
             extra={"name": "post_sigmoid_aggregation", "configured_record_batch_size": configured_batch_size, "record_count": len(list_of_texts)},

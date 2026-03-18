@@ -69,11 +69,22 @@ class SciXClassifierCelery(ADSCelery):
         if not hasattr(self, "_run_model_bound"):
             self._run_model_bound = set()
 
-    def _build_model_metadata(self, run_id=None):
+    def _record_context_id(self, record):
+        if record is None:
+            return None
+        return record.get("perf_metrics_context_id")
+
+    def _records_context_id(self, records):
+        if not records:
+            return None
+        return self._record_context_id(records[0])
+
+    def _build_model_metadata(self, run_id=None, context_id=None):
         with perf_metrics.timed_profile(
             category="app_timing",
             name="_build_model_metadata",
             run_id=run_id,
+            context_id=context_id,
             record_id=None,
             config=config,
         ):
@@ -89,16 +100,17 @@ class SciXClassifierCelery(ADSCelery):
             }
             return json.dumps(model_dict, sort_keys=True), json.dumps(postprocessing_dict, sort_keys=True)
 
-    def _get_or_create_model_id(self, session, run_id=None):
+    def _get_or_create_model_id(self, session, run_id=None, context_id=None):
         self._ensure_runtime_caches()
         with perf_metrics.timed_profile(
             category="app_timing",
             name="_get_or_create_model_id",
             run_id=run_id,
+            context_id=context_id,
             record_id=None,
             config=config,
         ):
-            model_json, postprocessing_json = self._build_model_metadata(run_id=run_id)
+            model_json, postprocessing_json = self._build_model_metadata(run_id=run_id, context_id=context_id)
             cache_key = (model_json, postprocessing_json)
             if self._cached_model_metadata_key == cache_key and self._cached_model_id is not None:
                 return self._cached_model_id
@@ -116,12 +128,13 @@ class SciXClassifierCelery(ADSCelery):
             self._cached_model_id = model_row.id
             return model_row.id
 
-    def _ensure_run_model(self, session, run_id, model_id):
+    def _ensure_run_model(self, session, run_id, model_id, context_id=None):
         self._ensure_runtime_caches()
         with perf_metrics.timed_profile(
             category="app_timing",
             name="_ensure_run_model",
             run_id=run_id,
+            context_id=context_id,
             record_id=None,
             config=config,
         ):
@@ -138,6 +151,7 @@ class SciXClassifierCelery(ADSCelery):
             category="app_timing",
             name="add_record_to_output_file",
             run_id=record.get("run_id"),
+            context_id=self._record_context_id(record),
             record_id=record.get("scix_id") or record.get("bibcode"),
             config=config,
         ):
@@ -148,6 +162,7 @@ class SciXClassifierCelery(ADSCelery):
             category="app_timing",
             name="_record_key",
             run_id=record.get("run_id"),
+            context_id=self._record_context_id(record),
             record_id=record.get("scix_id") or record.get("bibcode"),
             config=config,
         ):
@@ -157,10 +172,12 @@ class SciXClassifierCelery(ADSCelery):
 
     def _prefetch_overrides(self, session, records):
         run_id = records[0].get("run_id") if records else None
+        context_id = self._records_context_id(records)
         with perf_metrics.timed_profile(
             category="app_timing",
             name="_prefetch_overrides",
             run_id=run_id,
+            context_id=context_id,
             record_id=None,
             extra={"record_count": len(records)},
             config=config,
@@ -187,10 +204,12 @@ class SciXClassifierCelery(ADSCelery):
 
     def _prefetch_scores(self, session, batch_specs):
         run_id = batch_specs[0]["record"].get("run_id") if batch_specs else None
+        context_id = self._record_context_id(batch_specs[0]["record"]) if batch_specs else None
         with perf_metrics.timed_profile(
             category="app_timing",
             name="_prefetch_scores",
             run_id=run_id,
+            context_id=context_id,
             record_id=None,
             extra={"record_count": len(batch_specs)},
             config=config,
@@ -222,10 +241,12 @@ class SciXClassifierCelery(ADSCelery):
 
     def _prefetch_final_collections(self, session, records):
         run_id = records[0].get("run_id") if records else None
+        context_id = self._records_context_id(records)
         with perf_metrics.timed_profile(
             category="app_timing",
             name="_prefetch_final_collections",
             run_id=run_id,
+            context_id=context_id,
             record_id=None,
             extra={"record_count": len(records)},
             config=config,
@@ -254,10 +275,12 @@ class SciXClassifierCelery(ADSCelery):
         if not records:
             return []
         run_id = records[0].get("run_id")
+        context_id = self._records_context_id(records)
         with perf_metrics.timed_profile(
             category="app_timing",
             name="index_records_batch",
             run_id=run_id,
+            context_id=context_id,
             record_id=None,
             extra={"record_count": len(records)},
             config=config,
@@ -265,10 +288,10 @@ class SciXClassifierCelery(ADSCelery):
             batch_specs = []
             stage_start = time.perf_counter()
             with self.session_scope() as session:
-                model_id = self._get_or_create_model_id(session, run_id=run_id)
+                model_id = self._get_or_create_model_id(session, run_id=run_id, context_id=context_id)
                 run_ids = sorted({record.get("run_id") for record in records if record.get("run_id") is not None})
                 for item_run_id in run_ids:
-                    self._ensure_run_model(session, item_run_id, model_id)
+                    self._ensure_run_model(session, item_run_id, model_id, context_id=context_id)
 
                 overrides = self._prefetch_overrides(session, records)
 
@@ -366,6 +389,7 @@ class SciXClassifierCelery(ADSCelery):
             perf_metrics.emit_event(
                 stage="index_db",
                 run_id=run_ids[0] if len(run_ids) == 1 else None,
+                context_id=context_id,
                 record_id=None,
                 duration_ms=(time.perf_counter() - stage_start) * 1000.0,
                 status="ok",
@@ -382,7 +406,7 @@ class SciXClassifierCelery(ADSCelery):
             )
             return [(spec["record"], "record_indexed") for spec in batch_specs]
 
-    def index_run(self):
+    def index_run(self, perf_metrics_context_id=None):
         """
         Create and persist a new RunTable record in the database.
 
@@ -399,6 +423,7 @@ class SciXClassifierCelery(ADSCelery):
             perf_metrics.emit_event(
                 stage="app_timing",
                 run_id=run_row.id,
+                context_id=perf_metrics_context_id,
                 record_id=None,
                 duration_ms=(time.perf_counter() - start) * 1000.0,
                 status="ok",
@@ -424,6 +449,7 @@ class SciXClassifierCelery(ADSCelery):
             category="app_timing",
             name="index_record",
             run_id=record.get("run_id"),
+            context_id=self._record_context_id(record),
             record_id=record.get("scix_id") or record.get("bibcode"),
             config=config,
         ):
@@ -443,8 +469,9 @@ class SciXClassifierCelery(ADSCelery):
                 # Initial indexing of automatic classification results
                 if record['operation_step'] == 'classify' or record['operation_step'] == 'classify_verify':
                     logger.debug('Indexing new record')
-                    model_id = self._get_or_create_model_id(session, run_id=record.get('run_id'))
-                    self._ensure_run_model(session, record['run_id'], model_id)
+                    context_id = self._record_context_id(record)
+                    model_id = self._get_or_create_model_id(session, run_id=record.get('run_id'), context_id=context_id)
+                    self._ensure_run_model(session, record['run_id'], model_id, context_id=context_id)
 
                     check_overrides_query = session.query(models.OverrideTable).filter(or_(and_(models.OverrideTable.scix_id == record['scix_id'], models.OverrideTable.scix_id != None), and_(models.OverrideTable.bibcode == record['bibcode'], models.OverrideTable.bibcode != None))).order_by(models.OverrideTable.created.desc()).first()
 
@@ -498,6 +525,7 @@ class SciXClassifierCelery(ADSCelery):
                     perf_metrics.emit_event(
                         stage="index_db",
                         run_id=record.get("run_id"),
+                        context_id=self._record_context_id(record),
                         record_id=record.get("scix_id") or record.get("bibcode"),
                         duration_ms=(time.perf_counter() - stage_start) * 1000.0,
                         status=status,
@@ -560,6 +588,7 @@ class SciXClassifierCelery(ADSCelery):
                 perf_metrics.emit_event(
                     stage="index_db",
                     run_id=record.get("run_id"),
+                    context_id=self._record_context_id(record),
                     record_id=record.get("scix_id") or record.get("bibcode"),
                     duration_ms=(time.perf_counter() - stage_start) * 1000.0,
                     status=status,
@@ -568,7 +597,7 @@ class SciXClassifierCelery(ADSCelery):
                 )
                 return result
 
-    def query_final_collection_table(self, run_id=None, bibcode=None, scix_id=None):
+    def query_final_collection_table(self, run_id=None, bibcode=None, scix_id=None, perf_metrics_context_id=None):
         """
         Queries the FinalCollectionTable based on one of run_id, bibcode, or scix_id.
 
@@ -584,6 +613,7 @@ class SciXClassifierCelery(ADSCelery):
             category="app_timing",
             name="query_final_collection_table",
             run_id=run_id,
+            context_id=perf_metrics_context_id,
             record_id=scix_id or bibcode,
             config=config,
         ):
@@ -643,6 +673,7 @@ class SciXClassifierCelery(ADSCelery):
             category="app_timing",
             name="update_validated_records",
             run_id=run_id,
+            context_id=None,
             record_id=None,
             config=config,
         ):

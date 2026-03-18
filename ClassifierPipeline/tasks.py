@@ -81,6 +81,12 @@ def _chunk_records(records, chunk_size):
     for index in range(0, len(records), chunk_size):
         yield records[index:index + chunk_size]
 
+
+def _batch_context_id(records):
+    if not records:
+        return None
+    return records[0].get("perf_metrics_context_id")
+
 # ============================= TASKS ============================================= #
 
 @app.task(queue="update-record")
@@ -101,16 +107,18 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
     logger.debug(f'Message: {message}')
 
     request_list = utils.classifyRequestRecordList_to_list(message)
+    context_id = _batch_context_id(request_list)
 
     if request_list and request_list[0].get("run_id"):
         run_id = request_list[0].get("run_id")
     else:
-        run_id = app.index_run()
+        run_id = app.index_run(perf_metrics_context_id=context_id)
 
     with perf_metrics.timed_profile(
         category="task_timing",
         name="task_update_record",
         run_id=run_id,
+        context_id=context_id,
         record_id=None,
         extra={"record_count": len(request_list)},
         config=config,
@@ -170,7 +178,8 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
                       'run_id': run_id,
                       'output_format': output_format,
                       'override': None,
-                      'output_path': output_path
+                      'output_path': output_path,
+                      'perf_metrics_context_id': request.get("perf_metrics_context_id"),
                       }
             normalized_records.append(record)
 
@@ -191,6 +200,7 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
             perf_metrics.emit_event(
                 stage="ingest_enqueue",
                 run_id=run_id,
+                context_id=context_id,
                 record_id=None,
                 duration_ms=enqueue_ms,
                 extra={
@@ -223,10 +233,12 @@ def task_send_input_record_to_classifier(message):
     if not records:
         return
     run_id = records[0].get("run_id")
+    context_id = _batch_context_id(records)
     with perf_metrics.timed_profile(
         category="task_timing",
         name="task_send_input_record_to_classifier",
         run_id=run_id,
+        context_id=context_id,
         record_id=None,
         extra={"record_count": len(records)},
         config=config,
@@ -264,6 +276,7 @@ def task_send_input_record_to_classifier(message):
                 categories, scores = classifier.batch_score_SciX_categories(
                     real_texts,
                     run_id=run_id,
+                    context_id=context_id,
                     configured_record_batch_size=len(records),
                 )
                 logger.debug('Categories: {}'.format(categories))
@@ -290,6 +303,7 @@ def task_send_input_record_to_classifier(message):
             perf_metrics.emit_event(
                 stage="classify",
                 run_id=run_id,
+                context_id=context_id,
                 record_id=None,
                 duration_ms=(time.perf_counter() - stage_start) * 1000.0,
                 status=classify_status,
@@ -331,10 +345,12 @@ def task_index_classified_record(message):
 
     records = utils.classifyRequestRecordList_to_list(message)
     run_id = records[0].get("run_id") if records else None
+    context_id = _batch_context_id(records)
     with perf_metrics.timed_profile(
         category="task_timing",
         name="task_index_classified_record",
         run_id=run_id,
+        context_id=context_id,
         record_id=None,
         extra={"record_count": len(records)},
         config=config,
@@ -364,6 +380,7 @@ def task_index_classified_record(message):
                 perf_metrics.emit_event(
                     stage="index",
                     run_id=record.get("run_id"),
+                    context_id=record.get("perf_metrics_context_id"),
                     record_id=record_id,
                     duration_ms=(time.perf_counter() - stage_start) * 1000.0,
                     status=index_status,
@@ -417,11 +434,13 @@ def task_message_to_master(message):
         message (dict or list): A single record or list of classified records
     """
     run_id = message.get("run_id") if isinstance(message, dict) else (message[0].get("run_id") if message else None)
+    context_id = message.get("perf_metrics_context_id") if isinstance(message, dict) else ((message[0].get("perf_metrics_context_id")) if message else None)
     record_count = 1 if isinstance(message, dict) else len(message or [])
     with perf_metrics.timed_profile(
         category="task_timing",
         name="task_message_to_master",
         run_id=run_id,
+        context_id=context_id,
         record_id=None,
         extra={"record_count": record_count},
         config=config,
@@ -438,6 +457,7 @@ def task_message_to_master(message):
                 perf_metrics.emit_event(
                     stage="forward",
                     run_id=message.get("run_id"),
+                    context_id=message.get("perf_metrics_context_id"),
                     record_id=_record_identifier(message),
                     duration_ms=(time.perf_counter() - forward_start) * 1000.0,
                     status=status,
@@ -456,6 +476,7 @@ def task_message_to_master(message):
                     perf_metrics.emit_event(
                         stage="forward",
                         run_id=msg.get("run_id"),
+                        context_id=msg.get("perf_metrics_context_id"),
                         record_id=_record_identifier(msg),
                         duration_ms=(time.perf_counter() - forward_start) * 1000.0,
                         status=status,
@@ -473,10 +494,12 @@ def task_resend_to_master(message):
     """
     request_list = utils.classifyRequestRecordList_to_list(message)
     run_id = request_list[0].get("run_id") if request_list else None
+    context_id = _batch_context_id(request_list)
     with perf_metrics.timed_profile(
         category="task_timing",
         name="task_resend_to_master",
         run_id=run_id,
+        context_id=context_id,
         record_id=None,
         extra={"record_count": len(request_list)},
         config=config,
@@ -519,6 +542,7 @@ def task_update_validated_records(message):
         category="task_timing",
         name="task_update_validated_records",
         run_id=record.get("run_id"),
+        context_id=record.get("perf_metrics_context_id"),
         record_id=None,
         extra={"record_count": 1},
         config=config,
@@ -553,6 +577,7 @@ def task_output_results(message):
         category="task_timing",
         name="task_output_results",
         run_id=record.get("run_id"),
+        context_id=record.get("perf_metrics_context_id"),
         record_id=_record_identifier(record),
         extra={"record_count": 1},
         config=config,
