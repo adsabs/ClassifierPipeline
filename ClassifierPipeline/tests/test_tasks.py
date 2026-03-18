@@ -43,7 +43,7 @@ def _import_tasks_module(monkeypatch, base_fake_config, dummy_logger):
     fake_utils.dict_to_ClassifyResponseRecord = lambda message: {"wrapped": message}
 
     class FakeClassifier:
-        def batch_score_SciX_categories(self, texts):
+        def batch_score_SciX_categories(self, texts, **kwargs):
             return [["Astronomy"]], [[0.99]]
 
     fake_classifier_module = types.ModuleType("ClassifierPipeline.classifier")
@@ -178,7 +178,7 @@ def test_task_send_input_record_to_classifier_real_inference(monkeypatch, base_f
     forwarded = []
     module.perf_metrics.emit_event = lambda **kwargs: events.append(kwargs)
     module.task_index_classified_record = lambda message: forwarded.append(message)
-    module.classifier = types.SimpleNamespace(batch_score_SciX_categories=lambda texts: ([["Astronomy"]], [[0.9]]))
+    module.classifier = types.SimpleNamespace(batch_score_SciX_categories=lambda texts, **kwargs: ([["Astronomy"]], [[0.9]]))
     message = {"bibcode": "B", "title": "T", "abstract": "A", "run_id": "R"}
     module.task_send_input_record_to_classifier(message)
     assert forwarded[0][0]["categories"] == ["Astronomy"]
@@ -200,7 +200,7 @@ def test_task_send_input_record_to_classifier_real_inference_batch(monkeypatch, 
     module.perf_metrics.emit_event = lambda **kwargs: events.append(kwargs)
     module.task_index_classified_record = lambda message: forwarded.append(message)
     module.classifier = types.SimpleNamespace(
-        batch_score_SciX_categories=lambda texts: (calls.append(list(texts)) or ([["Astronomy"], ["Heliophysics"]], [[0.9], [0.8]]))
+        batch_score_SciX_categories=lambda texts, **kwargs: (calls.append(list(texts)) or ([["Astronomy"], ["Heliophysics"]], [[0.9], [0.8]]))
     )
     message = [
         {"bibcode": "B1", "title": "T1", "abstract": "A1", "run_id": "R"},
@@ -225,7 +225,7 @@ def test_task_send_input_record_to_classifier_mixed_fake_and_real_batch(monkeypa
     module.task_index_classified_record = lambda message: forwarded.append(message)
     module.perf_metrics.emit_event = lambda **kwargs: None
     module.classifier = types.SimpleNamespace(
-        batch_score_SciX_categories=lambda texts: (calls.append(list(texts)) or ([["Astronomy"]], [[0.9]]))
+        batch_score_SciX_categories=lambda texts, **kwargs: (calls.append(list(texts)) or ([["Astronomy"]], [[0.9]]))
     )
     module.task_send_input_record_to_classifier(
         [
@@ -249,7 +249,7 @@ def test_task_send_input_record_to_classifier_preserves_input_order(monkeypatch,
     module.task_index_classified_record = lambda message: forwarded.append(message)
     module.perf_metrics.emit_event = lambda **kwargs: None
     module.classifier = types.SimpleNamespace(
-        batch_score_SciX_categories=lambda texts: ([["Astronomy"], ["Heliophysics"]], [[0.9], [0.8]])
+        batch_score_SciX_categories=lambda texts, **kwargs: ([["Astronomy"], ["Heliophysics"]], [[0.9], [0.8]])
     )
     module.task_send_input_record_to_classifier(
         [

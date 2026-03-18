@@ -528,6 +528,8 @@ def aggregate_events(
     stage_errors: Dict[str, int] = {}
     task_timings: Dict[str, List[float]] = {}
     app_timings: Dict[str, List[float]] = {}
+    classifier_timings: Dict[str, List[float]] = {}
+    classifier_batch_shapes: Dict[str, List[float]] = {}
 
     submitted = 0
     indexed = 0
@@ -554,6 +556,12 @@ def aggregate_events(
             elif stage == "app_timing":
                 function_name = str(extra.get("name") or "unknown")
                 app_timings.setdefault(function_name, []).append(duration_value)
+            elif stage == "classifier_timing":
+                timing_name = str(extra.get("name") or "unknown")
+                classifier_timings.setdefault(timing_name, []).append(duration_value)
+            elif stage == "classifier_batch_shape":
+                shape_name = str(extra.get("name") or "unknown")
+                classifier_batch_shapes.setdefault(shape_name, []).append(duration_value)
             elif stage in {"classify", "index_db"}:
                 record_count = int(extra.get("record_count", 0) or 0)
                 normalized_duration = duration_value / record_count if record_count > 0 else duration_value
@@ -612,6 +620,8 @@ def aggregate_events(
         "latency_ms": latency_ms,
         "task_timing_ms": {name: _duration_stats(values) for name, values in task_timings.items()},
         "app_timing_ms": {name: _duration_stats(values) for name, values in app_timings.items()},
+        "classifier_timing_ms": {name: _duration_stats(values) for name, values in classifier_timings.items()},
+        "classifier_batch_shapes": {name: _numeric_stats(values, include_p99=True) for name, values in classifier_batch_shapes.items()},
         "batch_latency_ms": batch_latency_ms,
         "batch_sizes": batch_size_stats,
         "duration_s": {
@@ -711,6 +721,8 @@ def render_markdown(summary: Dict[str, Any], output_path: str) -> None:
     latency = summary.get("latency_ms", {}) or {}
     task_timing = summary.get("task_timing_ms", {}) or {}
     app_timing = summary.get("app_timing_ms", {}) or {}
+    classifier_timing = summary.get("classifier_timing_ms", {}) or {}
+    classifier_batch_shapes = summary.get("classifier_batch_shapes", {}) or {}
     batch_latency = summary.get("batch_latency_ms", {}) or {}
     batch_sizes = summary.get("batch_sizes", {}) or {}
     counts = summary.get("counts", {}) or {}
@@ -818,6 +830,52 @@ def render_markdown(summary: Dict[str, Any], output_path: str) -> None:
         ])
         for name in sorted(app_timing.keys()):
             stats = app_timing[name]
+            lines.append(
+                "| {name} | {count} | {p50} | {p95} | {p99} | {mean} | {min_v} | {max_v} |".format(
+                    name=name,
+                    count=stats.get("count", 0),
+                    p50=_fmt(stats.get("p50")),
+                    p95=_fmt(stats.get("p95")),
+                    p99=_fmt(stats.get("p99")),
+                    mean=_fmt(stats.get("mean")),
+                    min_v=_fmt(stats.get("min")),
+                    max_v=_fmt(stats.get("max")),
+                )
+            )
+        lines.append("")
+
+    if classifier_timing:
+        lines.extend([
+            "## Classifier Timing (ms)",
+            "",
+            "| Step | Count | p50 | p95 | p99 | Mean | Min | Max |",
+            "|---|---:|---:|---:|---:|---:|---:|---:|",
+        ])
+        for name in sorted(classifier_timing.keys()):
+            stats = classifier_timing[name]
+            lines.append(
+                "| {name} | {count} | {p50} | {p95} | {p99} | {mean} | {min_v} | {max_v} |".format(
+                    name=name,
+                    count=stats.get("count", 0),
+                    p50=_fmt(stats.get("p50")),
+                    p95=_fmt(stats.get("p95")),
+                    p99=_fmt(stats.get("p99")),
+                    mean=_fmt(stats.get("mean")),
+                    min_v=_fmt(stats.get("min")),
+                    max_v=_fmt(stats.get("max")),
+                )
+            )
+        lines.append("")
+
+    if classifier_batch_shapes:
+        lines.extend([
+            "## Classifier Batch Shapes",
+            "",
+            "| Metric | Count | p50 | p95 | p99 | Mean | Min | Max |",
+            "|---|---:|---:|---:|---:|---:|---:|---:|",
+        ])
+        for name in sorted(classifier_batch_shapes.keys()):
+            stats = classifier_batch_shapes[name]
             lines.append(
                 "| {name} | {count} | {p50} | {p95} | {p99} | {mean} | {min_v} | {max_v} |".format(
                     name=name,

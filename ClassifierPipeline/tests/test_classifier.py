@@ -243,3 +243,63 @@ def test_batch_score_propagates_model_error(monkeypatch, base_fake_config, dummy
     classifier = module.Classifier()
     with pytest.raises(RuntimeError, match="boom"):
         classifier.batch_score_SciX_categories(["doc"])
+
+
+def test_batch_score_emits_classifier_timing_and_shape_metrics(monkeypatch, base_fake_config, dummy_logger):
+    tokenizer = FakeTokenizer(token_ids=[[1, 2, 3], [4, 5, 6, 7, 8]])
+    model = FakeModel([
+        FakeTensor([[0.0, 1.0], [1.0, 0.0]]),
+        FakeTensor([[0.5, -0.5], [0.25, -0.25]]),
+    ])
+
+    class FakeWrapper:
+        def __init__(self):
+            self.tokenizer = tokenizer
+            self.model = model
+            self.labels = ["Astronomy", "Heliophysics"]
+            self.id2label = {0: "Astronomy", 1: "Heliophysics"}
+            self.label2id = {"Astronomy": 0, "Heliophysics": 1}
+
+    module = _import_classifier(monkeypatch, base_fake_config, dummy_logger, FakeWrapper)
+    captured = []
+
+    def fake_emit_event(**kwargs):
+        captured.append(kwargs)
+
+    monkeypatch.setattr(module.perf_metrics, "emit_event", fake_emit_event)
+
+    classifier = module.Classifier()
+    classifier.batch_score_SciX_categories(
+        ["doc1", "doc2"],
+        run_id="run-1",
+        configured_record_batch_size=10,
+        window_size=3,
+        window_stride=2,
+    )
+
+    timing_names = {
+        event["extra"]["name"]
+        for event in captured
+        if event["stage"] == "classifier_timing"
+    }
+    assert timing_names == {
+        "tokenizer_call",
+        "input_splitting",
+        "special_token_padding",
+        "model_forward",
+        "post_sigmoid_aggregation",
+    }
+
+    shape_events = {
+        event["extra"]["name"]: event["duration_ms"]
+        for event in captured
+        if event["stage"] == "classifier_batch_shape"
+    }
+    assert shape_events["configured_record_batch_size"] == 10.0
+    assert shape_events["total_chunks"] == 3.0
+    assert shape_events["effective_chunk_batch_size"] == 3.0
+    assert shape_events["max_chunks_per_record"] == 2.0
+    assert shape_events["mean_chunks_per_record"] == 1.5
+    assert shape_events["max_tokenized_length"] == 5.0
+    assert shape_events["padded_tensor_rows"] == 2.0
+    assert shape_events["padded_tensor_cols"] == 5.0

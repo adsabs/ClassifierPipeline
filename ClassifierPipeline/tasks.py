@@ -260,7 +260,11 @@ def task_send_input_record_to_classifier(message):
 
             if real_texts:
                 logger.debug('Performing Inference')
-                categories, scores = classifier.batch_score_SciX_categories(real_texts)
+                categories, scores = classifier.batch_score_SciX_categories(
+                    real_texts,
+                    run_id=run_id,
+                    configured_record_batch_size=len(records),
+                )
                 logger.debug('Categories: {}'.format(categories))
                 logger.debug('Allowed Categories: {}'.format(config['ALLOWED_CATEGORIES']))
                 logger.debug('Scores: {}'.format(scores))

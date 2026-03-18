@@ -21,9 +21,11 @@ Model Assumptions:
     - Supports long input splitting and score aggregation
 """
 import os
+import time
 from torch import no_grad, tensor
 from adsputils import load_config, setup_logging
 from ClassifierPipeline.astrobert_classification import AstroBERTClassification
+from ClassifierPipeline import perf_metrics
 
 proj_home = os.path.realpath(os.path.join(os.path.dirname(__file__), "../"))
 config = load_config(proj_home=proj_home)
@@ -99,7 +101,27 @@ class Classifier:
         return(split_input_ids_with_tokens)
 
         
-    def batch_score_SciX_categories(self, list_of_texts, score_combiner='max', score_thresholds=None, window_size=510,  window_stride=500):
+    def _emit_classifier_shape_metrics(self, run_id, configured_record_batch_size, shape_metrics):
+        for name, value in shape_metrics.items():
+            perf_metrics.emit_event(
+                stage="classifier_batch_shape",
+                run_id=run_id,
+                record_id=None,
+                duration_ms=float(value),
+                extra={"name": name},
+                config=config,
+            )
+
+    def batch_score_SciX_categories(
+        self,
+        list_of_texts,
+        score_combiner='max',
+        score_thresholds=None,
+        window_size=510,
+        window_stride=500,
+        run_id=None,
+        configured_record_batch_size=None,
+    ):
         """
         Classifies each input text into SciX categories using the model.
 
@@ -124,28 +146,74 @@ class Classifier:
 
         logger.debug('lists of texts')
         logger.debug('List of texts {}'.format(list_of_texts))
-        
-        list_of_texts_tokenized_input_ids = self.tokenizer(list_of_texts, add_special_tokens=False)['input_ids']
+
+        configured_batch_size = configured_record_batch_size or len(list_of_texts)
+
+        with perf_metrics.timed_profile(
+            category="classifier_timing",
+            name="tokenizer_call",
+            run_id=run_id,
+            record_id=None,
+            extra={"configured_record_batch_size": configured_batch_size, "record_count": len(list_of_texts)},
+            config=config,
+        ):
+            list_of_texts_tokenized_input_ids = self.tokenizer(list_of_texts, add_special_tokens=False)['input_ids']
 
         logger.debug('Tokenized input ids')
         logger.debug('List of texts tokenized input ids {}'.format(list_of_texts_tokenized_input_ids))
 
-        
-        # split
-        list_of_split_input_ids = [self.input_ids_splitter(t, window_size=window_size, window_stride=window_stride) for t in list_of_texts_tokenized_input_ids]
+        with perf_metrics.timed_profile(
+            category="classifier_timing",
+            name="input_splitting",
+            run_id=run_id,
+            record_id=None,
+            extra={"configured_record_batch_size": configured_batch_size, "record_count": len(list_of_texts)},
+            config=config,
+        ):
+            list_of_split_input_ids = [self.input_ids_splitter(t, window_size=window_size, window_stride=window_stride) for t in list_of_texts_tokenized_input_ids]
         # Full list of text
         # list_of_split_input_ids = input_ids_splitter(list_of_texts_tokenized_input_ids, window_size=window_size, window_stride=window_stride)
         
         logger.debug('Split input ids')
-        # add special tokens
-        list_of_split_input_ids_with_tokens = [self.add_special_tokens_split_input_ids(s, self.tokenizer) for s in list_of_split_input_ids]
-        
+        with perf_metrics.timed_profile(
+            category="classifier_timing",
+            name="special_token_padding",
+            run_id=run_id,
+            record_id=None,
+            extra={"configured_record_batch_size": configured_batch_size, "record_count": len(list_of_texts)},
+            config=config,
+        ):
+            list_of_split_input_ids_with_tokens = [self.add_special_tokens_split_input_ids(s, self.tokenizer) for s in list_of_split_input_ids]
+
         logger.debug('Split input ids with tokens')
         logger.debug('List of split input ids with tokens {}'.format(list_of_split_input_ids_with_tokens))
+
+        chunk_counts = [len(split_input_ids) for split_input_ids in list_of_split_input_ids]
+        total_chunks = sum(chunk_counts)
+        max_chunks = max(chunk_counts) if chunk_counts else 0
+        max_tokenized_length = max((len(token_ids) for token_ids in list_of_texts_tokenized_input_ids), default=0)
+        padded_tensor_rows = max((len(split_ids) for split_ids in list_of_split_input_ids_with_tokens), default=0)
+        padded_tensor_cols = max((len(split_ids[0]) for split_ids in list_of_split_input_ids_with_tokens if split_ids), default=0)
+        self._emit_classifier_shape_metrics(
+            run_id,
+            configured_batch_size,
+            {
+                "configured_record_batch_size": configured_batch_size,
+                "effective_chunk_batch_size": total_chunks,
+                "total_chunks": total_chunks,
+                "mean_chunks_per_record": (float(total_chunks) / len(chunk_counts)) if chunk_counts else 0.0,
+                "max_chunks_per_record": max_chunks,
+                "max_tokenized_length": max_tokenized_length,
+                "padded_tensor_rows": padded_tensor_rows,
+                "padded_tensor_cols": padded_tensor_cols,
+            },
+        )
         
         # list to return
         list_of_categories = []
         list_of_scores = []
+        model_forward_ms = 0.0
+        post_sigmoid_aggregation_ms = 0.0
         
         # forward call
         with no_grad():
@@ -156,15 +224,19 @@ class Classifier:
                 logger.debug('Predictions with model {}'.format(self.model))
                 try:
                     logger.debug('Really making predictions')
+                    model_start = time.perf_counter()
                     predictions = self.model(input_ids=tensor(split_input_ids_with_tokens))
+                    model_forward_ms += (time.perf_counter() - model_start) * 1000.0
                 except Exception as e:
                     logger.exception(f'Failed with: {str(e)}')
                     raise e
                 try:
                     logger.debug('Really making predictions - really')
+                    post_start = time.perf_counter()
                     predictions = predictions.logits.sigmoid()
                 except Exception as e:
                     logger.exception(f'Failed with: {str(e)}')
+                    raise e
 
                 logger.debug('Predictions {}'.format(predictions))
                 
@@ -185,8 +257,25 @@ class Classifier:
 
                 logger.debug('Appending categories')
                 list_of_categories.append([self.id2label[index] for index,score in enumerate(prediction) if score>=score_thresholds[index]])
+                post_sigmoid_aggregation_ms += (time.perf_counter() - post_start) * 1000.0
+
+        perf_metrics.emit_event(
+            stage="classifier_timing",
+            run_id=run_id,
+            record_id=None,
+            duration_ms=model_forward_ms,
+            extra={"name": "model_forward", "configured_record_batch_size": configured_batch_size, "record_count": len(list_of_texts)},
+            config=config,
+        )
+        perf_metrics.emit_event(
+            stage="classifier_timing",
+            run_id=run_id,
+            record_id=None,
+            duration_ms=post_sigmoid_aggregation_ms,
+            extra={"name": "post_sigmoid_aggregation", "configured_record_batch_size": configured_batch_size, "record_count": len(list_of_texts)},
+            config=config,
+        )
         
         logger.debug('Ran forward call')
         return(list_of_categories, list_of_scores)
         
-
