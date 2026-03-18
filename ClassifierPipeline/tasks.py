@@ -242,6 +242,7 @@ def task_send_input_record_to_classifier(message):
         logger.debug("Fake data set for queue messages: {}".format(fake_data))
 
         stage_start = time.perf_counter()
+        classify_status = "error"
         try:
             processed_records = [None for _ in records]
             real_positions = []

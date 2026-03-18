@@ -2,6 +2,8 @@ import importlib
 import sys
 import types
 
+import pytest
+
 
 class IdentityDecorator:
     def __call__(self, *args, **kwargs):
@@ -303,6 +305,27 @@ def test_task_send_input_record_to_classifier_fake_data_record_override(monkeypa
     module.task_index_classified_record = lambda message: forwarded.append(message)
     module.task_send_input_record_to_classifier({"bibcode": "B", "title": "T", "abstract": "A", "run_id": "R", "fake_data": True})
     assert forwarded[0][0]["categories"] == ["fake"]
+
+
+def test_task_send_input_record_to_classifier_emits_error_metric_without_unboundlocalerror(monkeypatch, base_fake_config, dummy_logger):
+    module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
+    module.config["FAKE_DATA"] = False
+    monkeypatch.delenv("PERF_FORCE_FAKE_DATA", raising=False)
+    module.utils.classifyRequestRecordList_to_list = lambda message: [dict(message)]
+    module.utils.list_to_ClassifyRequestRecordList = lambda payload: payload
+    module.utils.classify_record_from_scores = lambda record: record
+    events = []
+    module.perf_metrics.emit_event = lambda **kwargs: events.append(kwargs)
+    module.classifier = types.SimpleNamespace(
+        batch_score_SciX_categories=lambda texts, **kwargs: (_ for _ in ()).throw(RuntimeError("boom"))
+    )
+
+    with pytest.raises(RuntimeError, match="boom"):
+        module.task_send_input_record_to_classifier({"bibcode": "B", "title": "T", "abstract": "A", "run_id": "R"})
+
+    classify_events = [event for event in events if event["stage"] == "classify"]
+    assert classify_events
+    assert classify_events[0]["status"] == "error"
 
 
 def test_task_index_classified_record_classify_verify_path(monkeypatch, base_fake_config, dummy_logger):
