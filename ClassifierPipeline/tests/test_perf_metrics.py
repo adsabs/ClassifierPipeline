@@ -77,6 +77,38 @@ def test_emit_event_uses_registered_run_metrics_context(tmp_path, monkeypatch):
     assert payloads[0]["context_id"] == "ctx-1"
 
 
+def test_emit_event_without_explicit_context_id_uses_registered_run_context(tmp_path, monkeypatch):
+    importlib.reload(perf_metrics)
+    context_dir = tmp_path / "context"
+    events_path = tmp_path / "events.jsonl"
+    config = {"PERF_METRICS_ENABLED": False, "PERF_METRICS_CONTEXT_DIR": str(context_dir)}
+    monkeypatch.setenv("PERF_METRICS_CONTEXT_DIR", str(context_dir))
+    monkeypatch.delenv("PERF_METRICS_PATH", raising=False)
+    monkeypatch.delenv("PERF_METRICS_ENABLED", raising=False)
+
+    perf_metrics.register_run_metrics_context(
+        run_id=123,
+        enabled=True,
+        path=str(events_path),
+        context_id="ctx-1",
+        config=config,
+        context_dir=str(context_dir),
+    )
+    perf_metrics.emit_event(
+        stage="classifier_timing",
+        run_id=123,
+        duration_ms=4.5,
+        extra={"name": "tokenizer_call"},
+        config=config,
+    )
+
+    payloads = perf_metrics.load_events(str(events_path), run_id=123, context_id="ctx-1")
+    assert len(payloads) == 1
+    assert payloads[0]["stage"] == "classifier_timing"
+    assert payloads[0]["context_id"] == "ctx-1"
+    assert payloads[0]["extra"]["name"] == "tokenizer_call"
+
+
 def test_load_events_filters_by_context_id(tmp_path):
     path = tmp_path / "events.jsonl"
     path.write_text(

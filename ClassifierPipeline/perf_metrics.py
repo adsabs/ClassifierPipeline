@@ -86,23 +86,27 @@ def register_run_metrics_context(
     context_dir: Optional[str] = None,
 ) -> None:
     try:
+        targets = []
         target = _run_context_path(run_id, config=config, context_dir=context_dir, context_id=context_id)
-        if not target:
+        if target:
+            targets.append(target)
+        generic_target = _run_context_path(run_id, config=config, context_dir=context_dir)
+        if generic_target and generic_target not in targets:
+            targets.append(generic_target)
+        if not targets:
             return
-        directory = os.path.dirname(target)
-        if directory:
-            os.makedirs(directory, exist_ok=True)
-        with open(target, "w") as handle:
-            json.dump(
-                {
-                    "enabled": bool(enabled),
-                    "path": path,
-                    "context_id": context_id,
-                    "updated_at": time.time(),
-                },
-                handle,
-                sort_keys=True,
-            )
+        payload = {
+            "enabled": bool(enabled),
+            "path": path,
+            "context_id": context_id,
+            "updated_at": time.time(),
+        }
+        for current_target in targets:
+            directory = os.path.dirname(current_target)
+            if directory:
+                os.makedirs(directory, exist_ok=True)
+            with open(current_target, "w") as handle:
+                json.dump(payload, handle, sort_keys=True)
     except Exception:
         return
 
@@ -151,6 +155,7 @@ def emit_event(
             if run_id is not None
             else {"enabled": None, "path": None, "context_id": None}
         )
+        resolved_context_id = context_id or run_context.get("context_id")
         enabled = metrics_enabled(config=config)
         if run_context.get("enabled") is not None:
             enabled = bool(run_context.get("enabled"))
@@ -165,7 +170,7 @@ def emit_event(
             "ts": time.time(),
             "stage": stage,
             "run_id": str(run_id) if run_id is not None else None,
-            "context_id": context_id,
+            "context_id": resolved_context_id,
             "record_id": record_id,
             "duration_ms": float(duration_ms) if duration_ms is not None else None,
             "status": status,
