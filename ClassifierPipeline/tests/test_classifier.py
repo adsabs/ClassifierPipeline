@@ -158,9 +158,9 @@ def test_batch_score_with_max_combiner(monkeypatch, base_fake_config, dummy_logg
     tokenizer = FakeTokenizer(token_ids=[[1, 2, 3, 4, 5], [4, 5]])
     model = FakeModel([
         FakeTensor([
+            [0.8472978604, -0.8472978604],
             [-1.3862943611, 2.1972245773],
             [1.3862943611, -2.1972245773],
-            [0.8472978604, -0.8472978604],
         ]),
     ])
 
@@ -317,6 +317,34 @@ def test_batch_score_emits_classifier_timing_and_shape_metrics(monkeypatch, base
     assert shape_events["mean_micro_batch_records"] == 2.0
     assert shape_events["max_micro_batch_rows"] == 3.0
     assert shape_events["mean_micro_batch_rows"] == 3.0
+    assert shape_events["grouping_applied"] == 1.0
+    assert shape_events["mean_grouped_record_width"] == 5.0
+    assert shape_events["max_grouped_record_width"] == 5.0
+    assert shape_events["mean_micro_batch_padded_cols"] == 5.0
+    assert shape_events["max_micro_batch_padded_cols"] == 5.0
+    assert shape_events["mean_micro_batch_width_span"] == 0.0
+    assert shape_events["max_micro_batch_width_span"] == 0.0
+
+
+def test_group_prepared_records_by_length_sorts_by_width_then_index(monkeypatch, base_fake_config, dummy_logger):
+    class FakeWrapper:
+        def __init__(self):
+            self.tokenizer = FakeTokenizer()
+            self.model = FakeModel([FakeTensor([[0.0]])])
+            self.labels = ["Astronomy"]
+            self.id2label = {0: "Astronomy"}
+            self.label2id = {"Astronomy": 0}
+
+    module = _import_classifier(monkeypatch, base_fake_config, dummy_logger, FakeWrapper)
+    classifier = module.Classifier()
+    prepared = [
+        {"original_index": 2, "split_input_ids_with_tokens": [[1, 2, 3, 4]], "chunk_count": 1, "max_row_width": 4, "total_row_tokens": 4},
+        {"original_index": 0, "split_input_ids_with_tokens": [[1, 2]], "chunk_count": 1, "max_row_width": 2, "total_row_tokens": 2},
+        {"original_index": 1, "split_input_ids_with_tokens": [[1, 2]], "chunk_count": 1, "max_row_width": 2, "total_row_tokens": 2},
+        {"original_index": 3, "split_input_ids_with_tokens": [[1, 2, 3], [4]], "chunk_count": 2, "max_row_width": 3, "total_row_tokens": 4},
+    ]
+    grouped = classifier._group_prepared_records_by_length(prepared)
+    assert [record["original_index"] for record in grouped] == [0, 1, 3, 2]
 
 
 def test_batch_score_uses_internal_micro_batches(monkeypatch, base_fake_config, dummy_logger):
@@ -394,7 +422,7 @@ def test_batch_score_micro_batches_support_multichunk_records(monkeypatch, base_
         window_stride=2,
     )
     assert categories == [["Astronomy", "Heliophysics"], ["Astronomy"]]
-    assert scores[0] == pytest.approx([0.9525741268, 0.9525741268], rel=1e-5)
+    assert scores[0] == pytest.approx([0.6224593312, 0.9525741268], rel=1e-5)
     assert scores[1][0] > scores[1][1]
 
 
@@ -423,6 +451,100 @@ def test_batch_score_pads_mixed_width_rows_within_micro_batch(monkeypatch, base_
     input_rows = model.calls[0]["input_ids"].values
     widths = {len(row) for row in input_rows}
     assert widths == {5}
+
+
+def test_batch_score_preserves_output_order_after_length_grouping(monkeypatch, base_fake_config, dummy_logger):
+    tokenizer = FakeTokenizer(token_ids=[[1, 2, 3, 4, 5], [8], [9, 10, 11, 12]])
+    model = FakeModel([
+        FakeTensor([[-3.0, 3.0], [3.0, -3.0], [0.25, -0.25]]),
+        FakeTensor([[0.5, -0.5], [0.75, -0.75]]),
+    ])
+
+    class FakeWrapper:
+        def __init__(self):
+            self.tokenizer = tokenizer
+            self.model = model
+            self.labels = ["Astronomy", "Heliophysics"]
+            self.id2label = {0: "Astronomy", 1: "Heliophysics"}
+            self.label2id = {"Astronomy": 0, "Heliophysics": 1}
+
+    module = _import_classifier(monkeypatch, base_fake_config, dummy_logger, FakeWrapper)
+    classifier = module.Classifier()
+    categories, scores = classifier.batch_score_SciX_categories(
+        ["long-doc", "short-doc", "mid-doc"],
+        score_thresholds=[0.5, 0.5],
+        model_inference_batch_size=2,
+        window_size=3,
+        window_stride=2,
+    )
+    assert categories == [["Astronomy"], ["Heliophysics"], ["Astronomy"]]
+    assert scores[0][0] > scores[0][1]
+    assert scores[1][1] > scores[1][0]
+    assert scores[2][0] > scores[2][1]
+
+
+def test_batch_score_groups_mixed_width_records_into_lower_span_micro_batches(monkeypatch, base_fake_config, dummy_logger):
+    tokenizer = FakeTokenizer(token_ids=[[1, 2, 3, 4, 5], [6], [7, 8, 9, 10], [11]])
+    model = FakeModel([
+        FakeTensor([[0.0, 1.0], [1.0, 0.0], [0.5, -0.5]]),
+        FakeTensor([[0.0, 1.0], [1.0, 0.0], [0.5, -0.5]]),
+    ])
+
+    class FakeWrapper:
+        def __init__(self):
+            self.tokenizer = tokenizer
+            self.model = model
+            self.labels = ["Astronomy", "Heliophysics"]
+            self.id2label = {0: "Astronomy", 1: "Heliophysics"}
+            self.label2id = {"Astronomy": 0, "Heliophysics": 1}
+
+    module = _import_classifier(monkeypatch, base_fake_config, dummy_logger, FakeWrapper)
+    captured = []
+    monkeypatch.setattr(module.perf_metrics, "emit_event", lambda **kwargs: captured.append(kwargs))
+    classifier = module.Classifier()
+    classifier.batch_score_SciX_categories(
+        ["long-a", "short-a", "mid-a", "short-b"],
+        model_inference_batch_size=2,
+        window_size=3,
+        window_stride=2,
+    )
+    shape_events = {
+        event["extra"]["name"]: event["duration_ms"]
+        for event in captured
+        if event["stage"] == "classifier_batch_shape"
+    }
+    assert shape_events["mean_micro_batch_width_span"] < 2.5
+    assert shape_events["max_micro_batch_width_span"] <= 2.0
+
+
+def test_batch_score_length_grouping_supports_multichunk_records(monkeypatch, base_fake_config, dummy_logger):
+    tokenizer = FakeTokenizer(token_ids=[[1, 2, 3, 4, 5], [7], [8, 9, 10, 11, 12]])
+    model = FakeModel([
+        FakeTensor([[0.5, -0.5], [3.0, -3.0], [0.25, -0.25]]),
+        FakeTensor([[-3.0, 3.0], [-0.5, 0.5]]),
+    ])
+
+    class FakeWrapper:
+        def __init__(self):
+            self.tokenizer = tokenizer
+            self.model = model
+            self.labels = ["Astronomy", "Heliophysics"]
+            self.id2label = {0: "Astronomy", 1: "Heliophysics"}
+            self.label2id = {"Astronomy": 0, "Heliophysics": 1}
+
+    module = _import_classifier(monkeypatch, base_fake_config, dummy_logger, FakeWrapper)
+    classifier = module.Classifier()
+    categories, scores = classifier.batch_score_SciX_categories(
+        ["long-a", "short", "long-b"],
+        score_thresholds=[0.5, 0.5],
+        model_inference_batch_size=2,
+        window_size=3,
+        window_stride=2,
+    )
+    assert categories == [["Astronomy"], ["Astronomy"], ["Heliophysics"]]
+    assert scores[0][0] > scores[0][1]
+    assert scores[1][0] > scores[1][1]
+    assert scores[2][1] > scores[2][0]
 
 
 def test_batch_score_model_inference_batch_size_falls_back_to_default(monkeypatch, base_fake_config, dummy_logger):

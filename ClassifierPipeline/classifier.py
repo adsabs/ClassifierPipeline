@@ -120,6 +120,30 @@ class Classifier:
         for index in range(0, len(items), batch_size):
             yield items[index:index + batch_size]
 
+    def _prepare_records_for_inference(self, list_of_split_input_ids_with_tokens):
+        prepared_records = []
+        for index, split_input_ids_with_tokens in enumerate(list_of_split_input_ids_with_tokens):
+            prepared_records.append(
+                {
+                    "original_index": index,
+                    "split_input_ids_with_tokens": split_input_ids_with_tokens,
+                    "chunk_count": len(split_input_ids_with_tokens),
+                    "max_row_width": max((len(row) for row in split_input_ids_with_tokens), default=0),
+                    "total_row_tokens": sum(len(row) for row in split_input_ids_with_tokens),
+                }
+            )
+        return prepared_records
+
+    def _group_prepared_records_by_length(self, prepared_records):
+        return sorted(
+            prepared_records,
+            key=lambda record: (
+                record["max_row_width"],
+                record["chunk_count"],
+                record["original_index"],
+            ),
+        )
+
     def _pad_micro_batch_rows(self, flattened_rows, tokenizer):
         if not flattened_rows:
             return flattened_rows
@@ -234,18 +258,27 @@ class Classifier:
         max_tokenized_length = max((len(token_ids) for token_ids in list_of_texts_tokenized_input_ids), default=0)
         padded_tensor_rows = max((len(split_ids) for split_ids in list_of_split_input_ids_with_tokens), default=0)
         padded_tensor_cols = max((len(split_ids[0]) for split_ids in list_of_split_input_ids_with_tokens if split_ids), default=0)
-        prepared_records = [
-            {
-                "original_index": index,
-                "split_input_ids_with_tokens": split_input_ids_with_tokens,
-            }
-            for index, split_input_ids_with_tokens in enumerate(list_of_split_input_ids_with_tokens)
-        ]
+        prepared_records = self._prepare_records_for_inference(list_of_split_input_ids_with_tokens)
+        grouped_prepared_records = self._group_prepared_records_by_length(prepared_records)
 
-        micro_batches = list(self._chunk_list(prepared_records, resolved_model_inference_batch_size))
+        micro_batches = list(self._chunk_list(grouped_prepared_records, resolved_model_inference_batch_size))
         micro_batch_record_counts = [len(batch) for batch in micro_batches]
         micro_batch_row_counts = [
             sum(len(record["split_input_ids_with_tokens"]) for record in batch)
+            for batch in micro_batches
+        ]
+        grouped_record_widths = [record["max_row_width"] for record in grouped_prepared_records]
+        micro_batch_padded_cols = [
+            max((record["max_row_width"] for record in batch), default=0)
+            for batch in micro_batches
+        ]
+        micro_batch_width_spans = [
+            (
+                max((record["max_row_width"] for record in batch), default=0)
+                - min((record["max_row_width"] for record in batch), default=0)
+            )
+            if batch
+            else 0
             for batch in micro_batches
         ]
         self._emit_classifier_shape_metrics(
@@ -275,6 +308,25 @@ class Classifier:
                     if micro_batch_row_counts
                     else 0.0
                 ),
+                "grouping_applied": 1.0,
+                "mean_grouped_record_width": (
+                    float(sum(grouped_record_widths)) / len(grouped_record_widths)
+                    if grouped_record_widths
+                    else 0.0
+                ),
+                "max_grouped_record_width": max(grouped_record_widths, default=0),
+                "mean_micro_batch_padded_cols": (
+                    float(sum(micro_batch_padded_cols)) / len(micro_batch_padded_cols)
+                    if micro_batch_padded_cols
+                    else 0.0
+                ),
+                "max_micro_batch_padded_cols": max(micro_batch_padded_cols, default=0),
+                "mean_micro_batch_width_span": (
+                    float(sum(micro_batch_width_spans)) / len(micro_batch_width_spans)
+                    if micro_batch_width_spans
+                    else 0.0
+                ),
+                "max_micro_batch_width_span": max(micro_batch_width_spans, default=0),
             },
         )
         
