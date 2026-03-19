@@ -22,7 +22,7 @@ Model Assumptions:
 """
 import os
 import time
-from torch import no_grad, tensor
+import torch
 from adsputils import load_config, setup_logging
 from ClassifierPipeline.astrobert_classification import AstroBERTClassification
 from ClassifierPipeline import perf_metrics
@@ -144,24 +144,48 @@ class Classifier:
             ),
         )
 
-    def _pad_micro_batch_rows(self, flattened_rows, tokenizer):
-        if not flattened_rows:
-            return flattened_rows
-        max_width = max(len(row) for row in flattened_rows)
-        return [
-            row + [tokenizer.pad_token_id for _ in range(max_width - len(row))]
-            if len(row) < max_width
-            else row
-            for row in flattened_rows
-        ]
-
-    def _build_attention_mask(self, input_rows, tokenizer):
+    def _pad_rows_and_build_mask(self, flattened_rows, tokenizer):
         if tokenizer.pad_token_id is None:
             raise ValueError("tokenizer.pad_token_id must be defined to build attention masks")
-        return [
-            [0 if token_id == tokenizer.pad_token_id else 1 for token_id in row]
-            for row in input_rows
-        ]
+        if not flattened_rows:
+            return [], []
+        max_width = max(len(row) for row in flattened_rows)
+        padded_rows = []
+        attention_mask_rows = []
+        for row in flattened_rows:
+            row_len = len(row)
+            pad_count = max_width - row_len
+            row_mask = [0 if token_id == tokenizer.pad_token_id else 1 for token_id in row]
+            if pad_count > 0:
+                padded_rows.append(row + ([tokenizer.pad_token_id] * pad_count))
+                attention_mask_rows.append(row_mask + ([0] * pad_count))
+            else:
+                padded_rows.append(list(row))
+                attention_mask_rows.append(row_mask)
+        return padded_rows, attention_mask_rows
+
+    def _build_micro_batch_tensors(self, micro_batch):
+        flattened_rows = []
+        record_row_counts = []
+        for prepared_record in micro_batch:
+            split_input_ids_with_tokens = prepared_record["split_input_ids_with_tokens"]
+            flattened_rows.extend(split_input_ids_with_tokens)
+            record_row_counts.append(
+                (prepared_record["original_index"], len(split_input_ids_with_tokens))
+            )
+        padded_rows, attention_mask_rows = self._pad_rows_and_build_mask(flattened_rows, self.tokenizer)
+        input_ids_tensor = torch.tensor(padded_rows, dtype=torch.long)
+        attention_mask_tensor = torch.tensor(attention_mask_rows, dtype=torch.long)
+        active_token_count = sum(sum(mask_row) for mask_row in attention_mask_rows)
+        total_tensor_tokens = sum(len(row) for row in padded_rows)
+        shape_info = {
+            "row_count": len(padded_rows),
+            "col_count": len(padded_rows[0]) if padded_rows else 0,
+            "active_token_count": active_token_count,
+            "pad_token_count": total_tensor_tokens - active_token_count,
+            "pad_ratio": ((total_tensor_tokens - active_token_count) / float(total_tensor_tokens)) if total_tensor_tokens else 0.0,
+        }
+        return input_ids_tensor, attention_mask_tensor, record_row_counts, shape_info
 
         
     def _emit_classifier_shape_metrics(self, run_id, context_id, configured_record_batch_size, shape_metrics):
@@ -289,6 +313,22 @@ class Classifier:
             else 0
             for batch in micro_batches
         ]
+        micro_batch_token_counts = [
+            sum(record["total_row_tokens"] for record in batch)
+            for batch in micro_batches
+        ]
+        micro_batch_pad_tokens = [
+            max((record["max_row_width"] for record in batch), default=0)
+            * sum(len(record["split_input_ids_with_tokens"]) for record in batch)
+            - sum(record["total_row_tokens"] for record in batch)
+            for batch in micro_batches
+        ]
+        micro_batch_pad_ratios = [
+            (float(pad_tokens) / float(token_count + pad_tokens))
+            if (token_count + pad_tokens) > 0
+            else 0.0
+            for token_count, pad_tokens in zip(micro_batch_token_counts, micro_batch_pad_tokens)
+        ]
         self._emit_classifier_shape_metrics(
             run_id,
             context_id,
@@ -335,6 +375,24 @@ class Classifier:
                     else 0.0
                 ),
                 "max_micro_batch_width_span": max(micro_batch_width_spans, default=0),
+                "mean_micro_batch_token_count": (
+                    float(sum(micro_batch_token_counts)) / len(micro_batch_token_counts)
+                    if micro_batch_token_counts
+                    else 0.0
+                ),
+                "max_micro_batch_token_count": max(micro_batch_token_counts, default=0),
+                "mean_micro_batch_pad_tokens": (
+                    float(sum(micro_batch_pad_tokens)) / len(micro_batch_pad_tokens)
+                    if micro_batch_pad_tokens
+                    else 0.0
+                ),
+                "max_micro_batch_pad_tokens": max(micro_batch_pad_tokens, default=0),
+                "mean_micro_batch_pad_ratio": (
+                    float(sum(micro_batch_pad_ratios)) / len(micro_batch_pad_ratios)
+                    if micro_batch_pad_ratios
+                    else 0.0
+                ),
+                "max_micro_batch_pad_ratio": max(micro_batch_pad_ratios, default=0),
                 "attention_mask_applied": 1.0,
             },
         )
@@ -342,22 +400,17 @@ class Classifier:
         # list to return
         list_of_categories = [None] * len(list_of_texts)
         list_of_scores = [None] * len(list_of_texts)
+        micro_batch_tensor_prep_ms = 0.0
         model_forward_ms = 0.0
         post_sigmoid_aggregation_ms = 0.0
+        label_lookup = self.id2label
         
         # forward call
-        with no_grad():
+        with torch.no_grad():
             for micro_batch in micro_batches:
-                flattened_rows = []
-                record_row_counts = []
-                for prepared_record in micro_batch:
-                    split_input_ids_with_tokens = prepared_record["split_input_ids_with_tokens"]
-                    flattened_rows.extend(split_input_ids_with_tokens)
-                    record_row_counts.append(
-                        (prepared_record["original_index"], len(split_input_ids_with_tokens))
-                    )
-                flattened_rows = self._pad_micro_batch_rows(flattened_rows, self.tokenizer)
-                attention_mask = self._build_attention_mask(flattened_rows, self.tokenizer)
+                prep_start = time.perf_counter()
+                input_ids_tensor, attention_mask_tensor, record_row_counts, _shape_info = self._build_micro_batch_tensors(micro_batch)
+                micro_batch_tensor_prep_ms += (time.perf_counter() - prep_start) * 1000.0
 
                 logger.debug('Making predictions')
                 logger.debug('Predictions with model {}'.format(self.model))
@@ -365,8 +418,8 @@ class Classifier:
                     logger.debug('Really making predictions')
                     model_start = time.perf_counter()
                     predictions = self.model(
-                        input_ids=tensor(flattened_rows),
-                        attention_mask=tensor(attention_mask),
+                        input_ids=input_ids_tensor,
+                        attention_mask=attention_mask_tensor,
                     )
                     model_forward_ms += (time.perf_counter() - model_start) * 1000.0
                 except Exception as e:
@@ -399,12 +452,21 @@ class Classifier:
                     logger.debug('Assigning predictions')
                     list_of_scores[original_index] = prediction.tolist()
                     list_of_categories[original_index] = [
-                        self.id2label[index]
+                        label_lookup[index]
                         for index,score in enumerate(prediction)
                         if score>=score_thresholds[index]
                     ]
                 post_sigmoid_aggregation_ms += (time.perf_counter() - post_start) * 1000.0
 
+        perf_metrics.emit_event(
+            stage="classifier_timing",
+            run_id=run_id,
+            context_id=context_id,
+            record_id=None,
+            duration_ms=micro_batch_tensor_prep_ms,
+            extra={"name": "micro_batch_tensor_prep", "configured_record_batch_size": configured_batch_size, "record_count": len(list_of_texts)},
+            config=config,
+        )
         perf_metrics.emit_event(
             stage="classifier_timing",
             run_id=run_id,
