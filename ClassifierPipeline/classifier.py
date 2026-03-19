@@ -155,6 +155,14 @@ class Classifier:
             for row in flattened_rows
         ]
 
+    def _build_attention_mask(self, input_rows, tokenizer):
+        if tokenizer.pad_token_id is None:
+            raise ValueError("tokenizer.pad_token_id must be defined to build attention masks")
+        return [
+            [0 if token_id == tokenizer.pad_token_id else 1 for token_id in row]
+            for row in input_rows
+        ]
+
         
     def _emit_classifier_shape_metrics(self, run_id, context_id, configured_record_batch_size, shape_metrics):
         for name, value in shape_metrics.items():
@@ -327,6 +335,7 @@ class Classifier:
                     else 0.0
                 ),
                 "max_micro_batch_width_span": max(micro_batch_width_spans, default=0),
+                "attention_mask_applied": 1.0,
             },
         )
         
@@ -348,13 +357,17 @@ class Classifier:
                         (prepared_record["original_index"], len(split_input_ids_with_tokens))
                     )
                 flattened_rows = self._pad_micro_batch_rows(flattened_rows, self.tokenizer)
+                attention_mask = self._build_attention_mask(flattened_rows, self.tokenizer)
 
                 logger.debug('Making predictions')
                 logger.debug('Predictions with model {}'.format(self.model))
                 try:
                     logger.debug('Really making predictions')
                     model_start = time.perf_counter()
-                    predictions = self.model(input_ids=tensor(flattened_rows))
+                    predictions = self.model(
+                        input_ids=tensor(flattened_rows),
+                        attention_mask=tensor(attention_mask),
+                    )
                     model_forward_ms += (time.perf_counter() - model_start) * 1000.0
                 except Exception as e:
                     logger.exception(f'Failed with: {str(e)}')
