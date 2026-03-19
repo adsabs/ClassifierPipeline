@@ -14,6 +14,9 @@ class FakeQuery:
     def order_by(self, *args, **kwargs):
         return self
 
+    def join(self, *args, **kwargs):
+        return self
+
     def first(self):
         return self._first_result
 
@@ -47,8 +50,8 @@ class FakeSession:
             if getattr(obj, "id", None) is None:
                 obj.id = index
 
-    def query(self, model):
-        self.query_models.append(model)
+    def query(self, *models):
+        self.query_models.append(models if len(models) > 1 else models[0])
         return self.queries.pop(0)
 
 
@@ -405,13 +408,101 @@ def test_index_records_batch_preserves_input_order(monkeypatch, base_fake_config
 def test_query_final_collection_table_by_run_id(monkeypatch, base_fake_config, dummy_logger):
     module = _import_app_module(monkeypatch, base_fake_config, dummy_logger)
     queries = [
-        FakeQuery(first_result=types.SimpleNamespace(id=7)),
-        FakeQuery(all_result=[types.SimpleNamespace(bibcode="B", scix_id="S")]),
-        FakeQuery(first_result=types.SimpleNamespace(collection=["Astronomy"])),
+        FakeQuery(
+            all_result=[
+                (
+                    types.SimpleNamespace(bibcode="B", scix_id="S", collection=["Astronomy"], created=2),
+                    types.SimpleNamespace(bibcode="B", scix_id="S"),
+                )
+            ]
+        ),
     ]
     session = FakeSession(queries)
     app = _new_app(module, session)
     assert app.query_final_collection_table(run_id=7) == [{"bibcode": "B", "scix_id": "S", "collections": ["Astronomy"]}]
+
+
+def test_query_final_collection_table_by_run_id_dedupes_duplicate_final_rows(monkeypatch, base_fake_config, dummy_logger):
+    module = _import_app_module(monkeypatch, base_fake_config, dummy_logger)
+    queries = [
+        FakeQuery(
+            all_result=[
+                (
+                    types.SimpleNamespace(bibcode="B", scix_id=None, collection=["Astronomy"], created=5),
+                    types.SimpleNamespace(bibcode="B", scix_id=None),
+                ),
+                (
+                    types.SimpleNamespace(bibcode="B", scix_id=None, collection=["Physics"], created=1),
+                    types.SimpleNamespace(bibcode="B", scix_id=None),
+                ),
+            ]
+        ),
+    ]
+    session = FakeSession(queries)
+    app = _new_app(module, session)
+    assert app.query_final_collection_table(run_id=7) == [{"bibcode": "B", "scix_id": None, "collections": ["Astronomy"]}]
+
+
+def test_query_final_collection_table_by_run_id_prefers_scix_id_for_dedupe(monkeypatch, base_fake_config, dummy_logger):
+    module = _import_app_module(monkeypatch, base_fake_config, dummy_logger)
+    queries = [
+        FakeQuery(
+            all_result=[
+                (
+                    types.SimpleNamespace(bibcode="B1", scix_id="S1", collection=["Astronomy"], created=5),
+                    types.SimpleNamespace(bibcode="B1", scix_id="S1"),
+                ),
+                (
+                    types.SimpleNamespace(bibcode="B2", scix_id="S1", collection=["Physics"], created=4),
+                    types.SimpleNamespace(bibcode="B2", scix_id="S1"),
+                ),
+            ]
+        ),
+    ]
+    session = FakeSession(queries)
+    app = _new_app(module, session)
+    assert app.query_final_collection_table(run_id=7) == [{"bibcode": "B1", "scix_id": "S1", "collections": ["Astronomy"]}]
+
+
+def test_query_final_collection_table_by_run_id_preserves_distinct_records(monkeypatch, base_fake_config, dummy_logger):
+    module = _import_app_module(monkeypatch, base_fake_config, dummy_logger)
+    queries = [
+        FakeQuery(
+            all_result=[
+                (
+                    types.SimpleNamespace(bibcode="B1", scix_id=None, collection=["Astronomy"], created=5),
+                    types.SimpleNamespace(bibcode="B1", scix_id=None),
+                ),
+                (
+                    types.SimpleNamespace(bibcode="B2", scix_id=None, collection=["Physics"], created=4),
+                    types.SimpleNamespace(bibcode="B2", scix_id=None),
+                ),
+            ]
+        ),
+    ]
+    session = FakeSession(queries)
+    app = _new_app(module, session)
+    assert app.query_final_collection_table(run_id=7) == [
+        {"bibcode": "B1", "scix_id": None, "collections": ["Astronomy"]},
+        {"bibcode": "B2", "scix_id": None, "collections": ["Physics"]},
+    ]
+
+
+def test_query_final_collection_table_by_run_id_uses_score_linkage_not_latest_identifier_lookup(monkeypatch, base_fake_config, dummy_logger):
+    module = _import_app_module(monkeypatch, base_fake_config, dummy_logger)
+    queries = [
+        FakeQuery(
+            all_result=[
+                (
+                    types.SimpleNamespace(bibcode="B", scix_id=None, collection=["Astronomy"], created=2, score_id=7),
+                    types.SimpleNamespace(id=7, bibcode="B", scix_id=None, run_id=7),
+                )
+            ]
+        ),
+    ]
+    session = FakeSession(queries)
+    app = _new_app(module, session)
+    assert app.query_final_collection_table(run_id=7) == [{"bibcode": "B", "scix_id": None, "collections": ["Astronomy"]}]
 
 
 def test_query_final_collection_table_by_bibcode(monkeypatch, base_fake_config, dummy_logger):

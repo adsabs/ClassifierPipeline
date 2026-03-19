@@ -170,6 +170,11 @@ class SciXClassifierCelery(ADSCelery):
                 return ("scix_id", record.get("scix_id"))
             return ("bibcode", record.get("bibcode"))
 
+    def _result_record_key(self, bibcode=None, scix_id=None):
+        if scix_id:
+            return ("scix_id", scix_id)
+        return ("bibcode", bibcode)
+
     def _prefetch_overrides(self, session, records):
         run_id = records[0].get("run_id") if records else None
         context_id = self._records_context_id(records)
@@ -620,19 +625,28 @@ class SciXClassifierCelery(ADSCelery):
             with self.session_scope() as session:
                 record_list = []
                 if run_id is not None:
+                    run_rows = (
+                        session.query(models.FinalCollectionTable, models.ScoreTable)
+                        .join(models.ScoreTable, models.FinalCollectionTable.score_id == models.ScoreTable.id)
+                        .filter(models.ScoreTable.run_id == run_id)
+                        .order_by(models.FinalCollectionTable.created.desc())
+                        .all()
+                    )
+                    seen_keys = set()
+                    for final_collection_row, score_row in run_rows:
+                        out_bibcode = final_collection_row.bibcode or score_row.bibcode
+                        out_scix_id = final_collection_row.scix_id or score_row.scix_id
+                        dedupe_key = self._result_record_key(bibcode=out_bibcode, scix_id=out_scix_id)
+                        if dedupe_key in seen_keys:
+                            continue
+                        seen_keys.add(dedupe_key)
 
-                    run_query = session.query(models.RunTable).filter(models.RunTable.id == run_id).first()
-                    run_id_query = session.query(models.ScoreTable).filter(models.ScoreTable.run_id == run_query.id).all()
-
-                    for record in run_id_query:
-
-                        logger.debug(f'Record bibcode: {record.bibcode}, scix_id: {record.scix_id}')
-
-                        final_collection_query = session.query(models.FinalCollectionTable).filter(or_(and_(models.FinalCollectionTable.scix_id == record.scix_id, models.FinalCollectionTable.scix_id != None), and_(models.FinalCollectionTable.bibcode == record.bibcode, models.FinalCollectionTable.bibcode != None))).order_by(models.FinalCollectionTable.created.desc()).first()
-
-                        out_record = {'bibcode' : record.bibcode,
-                                      'scix_id' : record.scix_id,
-                                      'collections' : final_collection_query.collection}
+                        logger.debug(f'Record bibcode: {out_bibcode}, scix_id: {out_scix_id}')
+                        out_record = {
+                            'bibcode': out_bibcode,
+                            'scix_id': out_scix_id,
+                            'collections': final_collection_row.collection,
+                        }
                         record_list.append(out_record)
 
                 if bibcode is not None:
