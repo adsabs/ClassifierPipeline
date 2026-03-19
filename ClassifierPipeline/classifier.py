@@ -100,6 +100,26 @@ class Classifier:
         
         return(split_input_ids_with_tokens)
 
+    def _resolve_model_inference_batch_size(self, requested_size=None):
+        if requested_size is not None:
+            try:
+                requested_value = int(requested_size)
+                if requested_value > 0:
+                    return requested_value
+            except (TypeError, ValueError):
+                pass
+        try:
+            configured_value = int(config.get("MODEL_INFERENCE_BATCH_SIZE", 16) or 16)
+            if configured_value > 0:
+                return configured_value
+        except (TypeError, ValueError):
+            pass
+        return 16
+
+    def _chunk_list(self, items, batch_size):
+        for index in range(0, len(items), batch_size):
+            yield items[index:index + batch_size]
+
         
     def _emit_classifier_shape_metrics(self, run_id, context_id, configured_record_batch_size, shape_metrics):
         for name, value in shape_metrics.items():
@@ -123,6 +143,7 @@ class Classifier:
         run_id=None,
         context_id=None,
         configured_record_batch_size=None,
+        model_inference_batch_size=None,
     ):
         """
         Classifies each input text into SciX categories using the model.
@@ -150,6 +171,9 @@ class Classifier:
         logger.debug('List of texts {}'.format(list_of_texts))
 
         configured_batch_size = configured_record_batch_size or len(list_of_texts)
+        resolved_model_inference_batch_size = self._resolve_model_inference_batch_size(
+            requested_size=model_inference_batch_size
+        )
 
         with perf_metrics.timed_profile(
             category="classifier_timing",
@@ -199,12 +223,27 @@ class Classifier:
         max_tokenized_length = max((len(token_ids) for token_ids in list_of_texts_tokenized_input_ids), default=0)
         padded_tensor_rows = max((len(split_ids) for split_ids in list_of_split_input_ids_with_tokens), default=0)
         padded_tensor_cols = max((len(split_ids[0]) for split_ids in list_of_split_input_ids_with_tokens if split_ids), default=0)
+        prepared_records = [
+            {
+                "original_index": index,
+                "split_input_ids_with_tokens": split_input_ids_with_tokens,
+            }
+            for index, split_input_ids_with_tokens in enumerate(list_of_split_input_ids_with_tokens)
+        ]
+
+        micro_batches = list(self._chunk_list(prepared_records, resolved_model_inference_batch_size))
+        micro_batch_record_counts = [len(batch) for batch in micro_batches]
+        micro_batch_row_counts = [
+            sum(len(record["split_input_ids_with_tokens"]) for record in batch)
+            for batch in micro_batches
+        ]
         self._emit_classifier_shape_metrics(
             run_id,
             context_id,
             configured_batch_size,
             {
                 "configured_record_batch_size": configured_batch_size,
+                "model_inference_batch_size": resolved_model_inference_batch_size,
                 "effective_chunk_batch_size": total_chunks,
                 "total_chunks": total_chunks,
                 "mean_chunks_per_record": (float(total_chunks) / len(chunk_counts)) if chunk_counts else 0.0,
@@ -212,26 +251,46 @@ class Classifier:
                 "max_tokenized_length": max_tokenized_length,
                 "padded_tensor_rows": padded_tensor_rows,
                 "padded_tensor_cols": padded_tensor_cols,
+                "micro_batch_count": len(micro_batches),
+                "max_micro_batch_records": max(micro_batch_record_counts, default=0),
+                "mean_micro_batch_records": (
+                    float(sum(micro_batch_record_counts)) / len(micro_batch_record_counts)
+                    if micro_batch_record_counts
+                    else 0.0
+                ),
+                "max_micro_batch_rows": max(micro_batch_row_counts, default=0),
+                "mean_micro_batch_rows": (
+                    float(sum(micro_batch_row_counts)) / len(micro_batch_row_counts)
+                    if micro_batch_row_counts
+                    else 0.0
+                ),
             },
         )
         
         # list to return
-        list_of_categories = []
-        list_of_scores = []
+        list_of_categories = [None] * len(list_of_texts)
+        list_of_scores = [None] * len(list_of_texts)
         model_forward_ms = 0.0
         post_sigmoid_aggregation_ms = 0.0
         
         # forward call
         with no_grad():
-            # for split_input_ids_with_tokens in tqdm(list_of_split_input_ids_with_tokens):
-            for split_input_ids_with_tokens in list_of_split_input_ids_with_tokens:
-                # make predictions
+            for micro_batch in micro_batches:
+                flattened_rows = []
+                record_row_counts = []
+                for prepared_record in micro_batch:
+                    split_input_ids_with_tokens = prepared_record["split_input_ids_with_tokens"]
+                    flattened_rows.extend(split_input_ids_with_tokens)
+                    record_row_counts.append(
+                        (prepared_record["original_index"], len(split_input_ids_with_tokens))
+                    )
+
                 logger.debug('Making predictions')
                 logger.debug('Predictions with model {}'.format(self.model))
                 try:
                     logger.debug('Really making predictions')
                     model_start = time.perf_counter()
-                    predictions = self.model(input_ids=tensor(split_input_ids_with_tokens))
+                    predictions = self.model(input_ids=tensor(flattened_rows))
                     model_forward_ms += (time.perf_counter() - model_start) * 1000.0
                 except Exception as e:
                     logger.exception(f'Failed with: {str(e)}')
@@ -247,22 +306,26 @@ class Classifier:
                 logger.debug('Predictions {}'.format(predictions))
                 
                 logger.debug('COmbining predictions')
-                # combine into one prediction
-                if score_combiner=='mean':
-                    prediction = predictions.mean(dim=0)
-                elif score_combiner=='max':
-                    prediction = predictions.max(dim=0)[0]
-                else:
-                    # should be a custom lambda function
-                    prediction = score_combiner(predictions)
-                
+                prediction_row_start = 0
+                for original_index, row_count in record_row_counts:
+                    prediction_rows = predictions[prediction_row_start:prediction_row_start + row_count]
+                    prediction_row_start += row_count
+                    record_predictions = prediction_rows
 
-                logger.debug('Appending predictions')
-                list_of_scores.append(prediction.tolist())
-                # filter by scores above score_threshold
+                    if score_combiner=='mean':
+                        prediction = record_predictions.mean(dim=0)
+                    elif score_combiner=='max':
+                        prediction = record_predictions.max(dim=0)[0]
+                    else:
+                        prediction = score_combiner(record_predictions)
 
-                logger.debug('Appending categories')
-                list_of_categories.append([self.id2label[index] for index,score in enumerate(prediction) if score>=score_thresholds[index]])
+                    logger.debug('Assigning predictions')
+                    list_of_scores[original_index] = prediction.tolist()
+                    list_of_categories[original_index] = [
+                        self.id2label[index]
+                        for index,score in enumerate(prediction)
+                        if score>=score_thresholds[index]
+                    ]
                 post_sigmoid_aggregation_ms += (time.perf_counter() - post_start) * 1000.0
 
         perf_metrics.emit_event(

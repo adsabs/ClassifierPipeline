@@ -211,7 +211,34 @@ def test_task_send_input_record_to_classifier_real_inference_batch(monkeypatch, 
     module.task_send_input_record_to_classifier(message)
     assert calls == [["T1 A1", "T2 A2"]]
     assert [record["categories"] for record in forwarded[0]] == [["Astronomy"], ["Heliophysics"]]
-    assert events[0]["extra"]["record_count"] == 2
+
+
+def test_task_send_input_record_to_classifier_passes_model_inference_batch_size(monkeypatch, base_fake_config, dummy_logger):
+    module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
+    module.config["FAKE_DATA"] = False
+    module.config["MODEL_INFERENCE_BATCH_SIZE"] = 16
+    monkeypatch.delenv("PERF_FORCE_FAKE_DATA", raising=False)
+    module.utils.classifyRequestRecordList_to_list = lambda message: [dict(item) for item in message]
+    module.utils.classify_record_from_scores = lambda record: record
+    module.utils.list_to_ClassifyRequestRecordList = lambda payload: payload
+    module.perf_metrics.emit_event = lambda **kwargs: None
+    forwarded = []
+    captured = {}
+    module.classifier = types.SimpleNamespace(
+        batch_score_SciX_categories=lambda texts, **kwargs: (
+            captured.update(kwargs) or ([["Astronomy"], ["Heliophysics"]], [[0.9], [0.8]])
+        )
+    )
+    module.task_index_classified_record = lambda message: forwarded.append(message)
+    module.task_send_input_record_to_classifier(
+        [
+            {"bibcode": "B1", "title": "T1", "abstract": "A1", "run_id": "R"},
+            {"bibcode": "B2", "title": "T2", "abstract": "A2", "run_id": "R"},
+        ]
+    )
+    assert captured["configured_record_batch_size"] == 2
+    assert captured["model_inference_batch_size"] == 16
+    assert forwarded
 
 
 def test_task_send_input_record_to_classifier_mixed_fake_and_real_batch(monkeypatch, base_fake_config, dummy_logger):

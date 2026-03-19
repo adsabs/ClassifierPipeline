@@ -278,6 +278,7 @@ def task_send_input_record_to_classifier(message):
                     run_id=run_id,
                     context_id=context_id,
                     configured_record_batch_size=len(records),
+                    model_inference_batch_size=config.get("MODEL_INFERENCE_BATCH_SIZE"),
                 )
                 logger.debug('Categories: {}'.format(categories))
                 logger.debug('Allowed Categories: {}'.format(config['ALLOWED_CATEGORIES']))
