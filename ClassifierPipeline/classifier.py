@@ -120,6 +120,17 @@ class Classifier:
         for index in range(0, len(items), batch_size):
             yield items[index:index + batch_size]
 
+    def _pad_micro_batch_rows(self, flattened_rows, tokenizer):
+        if not flattened_rows:
+            return flattened_rows
+        max_width = max(len(row) for row in flattened_rows)
+        return [
+            row + [tokenizer.pad_token_id for _ in range(max_width - len(row))]
+            if len(row) < max_width
+            else row
+            for row in flattened_rows
+        ]
+
         
     def _emit_classifier_shape_metrics(self, run_id, context_id, configured_record_batch_size, shape_metrics):
         for name, value in shape_metrics.items():
@@ -284,6 +295,7 @@ class Classifier:
                     record_row_counts.append(
                         (prepared_record["original_index"], len(split_input_ids_with_tokens))
                     )
+                flattened_rows = self._pad_micro_batch_rows(flattened_rows, self.tokenizer)
 
                 logger.debug('Making predictions')
                 logger.debug('Predictions with model {}'.format(self.model))

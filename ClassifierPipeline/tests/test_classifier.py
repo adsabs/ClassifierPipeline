@@ -398,6 +398,33 @@ def test_batch_score_micro_batches_support_multichunk_records(monkeypatch, base_
     assert scores[1][0] > scores[1][1]
 
 
+def test_batch_score_pads_mixed_width_rows_within_micro_batch(monkeypatch, base_fake_config, dummy_logger):
+    tokenizer = FakeTokenizer(token_ids=[[1, 2, 3, 4], [7]])
+    model = FakeModel([
+        FakeTensor([[0.0, 1.0], [1.0, 0.0], [0.5, -0.5]]),
+    ])
+
+    class FakeWrapper:
+        def __init__(self):
+            self.tokenizer = tokenizer
+            self.model = model
+            self.labels = ["Astronomy", "Heliophysics"]
+            self.id2label = {0: "Astronomy", 1: "Heliophysics"}
+            self.label2id = {"Astronomy": 0, "Heliophysics": 1}
+
+    module = _import_classifier(monkeypatch, base_fake_config, dummy_logger, FakeWrapper)
+    classifier = module.Classifier()
+    classifier.batch_score_SciX_categories(
+        ["doc1", "doc2"],
+        model_inference_batch_size=2,
+        window_size=3,
+        window_stride=2,
+    )
+    input_rows = model.calls[0]["input_ids"].values
+    widths = {len(row) for row in input_rows}
+    assert widths == {5}
+
+
 def test_batch_score_model_inference_batch_size_falls_back_to_default(monkeypatch, base_fake_config, dummy_logger):
     class FakeWrapper:
         def __init__(self):
