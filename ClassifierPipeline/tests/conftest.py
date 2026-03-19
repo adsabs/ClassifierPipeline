@@ -51,6 +51,7 @@ def base_fake_config():
         "FAKE_DATA": False,
         "OPERATION_STEP": "classify_verify",
         "CLASSIFY_STAGE_BATCH_SIZE": 100,
+        "CLASSIFIER_PRE_FORWARD_BATCH_SIZE": 100,
         "MODEL_INFERENCE_BATCH_SIZE": 16,
         "TEST_INPUT_DATA": "ClassifierPipeline/tests/stub_data/classifier_request.json",
     }

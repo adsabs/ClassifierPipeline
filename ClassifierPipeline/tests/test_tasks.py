@@ -192,6 +192,7 @@ def test_task_send_input_record_to_classifier_real_inference(monkeypatch, base_f
 def test_task_send_input_record_to_classifier_real_inference_batch(monkeypatch, base_fake_config, dummy_logger):
     module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
     module.config["FAKE_DATA"] = False
+    module.config["CLASSIFIER_PRE_FORWARD_BATCH_SIZE"] = 2
     monkeypatch.delenv("PERF_FORCE_FAKE_DATA", raising=False)
     module.utils.classifyRequestRecordList_to_list = lambda message: [dict(item) for item in message]
     module.utils.classify_record_from_scores = lambda record: {**record, "classified": True}
@@ -213,9 +214,42 @@ def test_task_send_input_record_to_classifier_real_inference_batch(monkeypatch, 
     assert [record["categories"] for record in forwarded[0]] == [["Astronomy"], ["Heliophysics"]]
 
 
+def test_task_send_input_record_to_classifier_honors_pre_forward_batch_size(monkeypatch, base_fake_config, dummy_logger):
+    module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
+    module.config["FAKE_DATA"] = False
+    module.config["CLASSIFIER_PRE_FORWARD_BATCH_SIZE"] = 2
+    monkeypatch.delenv("PERF_FORCE_FAKE_DATA", raising=False)
+    module.utils.classifyRequestRecordList_to_list = lambda message: [dict(item) for item in message]
+    module.utils.classify_record_from_scores = lambda record: record
+    module.utils.list_to_ClassifyRequestRecordList = lambda payload: payload
+    module.perf_metrics.emit_event = lambda **kwargs: None
+    forwarded = []
+    calls = []
+
+    def batch_score(texts, **kwargs):
+        calls.append({"texts": list(texts), "kwargs": dict(kwargs)})
+        categories = [[f"cat-{text.split()[0]}"] for text in texts]
+        scores = [[float(len(text))] for text in texts]
+        return categories, scores
+
+    module.classifier = types.SimpleNamespace(batch_score_SciX_categories=batch_score)
+    module.task_index_classified_record = lambda message: forwarded.append(message)
+    module.task_send_input_record_to_classifier(
+        [
+            {"bibcode": "B1", "title": "T1", "abstract": "A1", "run_id": "R"},
+            {"bibcode": "B2", "title": "T2", "abstract": "A2", "run_id": "R"},
+            {"bibcode": "B3", "title": "T3", "abstract": "A3", "run_id": "R"},
+        ]
+    )
+    assert [call["texts"] for call in calls] == [["T1 A1", "T2 A2"], ["T3 A3"]]
+    assert [call["kwargs"]["configured_record_batch_size"] for call in calls] == [2, 1]
+    assert [record["categories"] for record in forwarded[0]] == [["cat-T1"], ["cat-T2"], ["cat-T3"]]
+
+
 def test_task_send_input_record_to_classifier_passes_model_inference_batch_size(monkeypatch, base_fake_config, dummy_logger):
     module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
     module.config["FAKE_DATA"] = False
+    module.config["CLASSIFIER_PRE_FORWARD_BATCH_SIZE"] = 2
     module.config["MODEL_INFERENCE_BATCH_SIZE"] = 16
     monkeypatch.delenv("PERF_FORCE_FAKE_DATA", raising=False)
     module.utils.classifyRequestRecordList_to_list = lambda message: [dict(item) for item in message]
@@ -239,6 +273,16 @@ def test_task_send_input_record_to_classifier_passes_model_inference_batch_size(
     assert captured["configured_record_batch_size"] == 2
     assert captured["model_inference_batch_size"] == 16
     assert forwarded
+
+
+def test_resolve_positive_int_config_falls_back_for_invalid_values(monkeypatch, base_fake_config, dummy_logger):
+    module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
+    module.config["CLASSIFIER_PRE_FORWARD_BATCH_SIZE"] = 0
+    assert module._resolve_positive_int_config("CLASSIFIER_PRE_FORWARD_BATCH_SIZE", 7) == 7
+    module.config["CLASSIFIER_PRE_FORWARD_BATCH_SIZE"] = -1
+    assert module._resolve_positive_int_config("CLASSIFIER_PRE_FORWARD_BATCH_SIZE", 7) == 7
+    module.config["CLASSIFIER_PRE_FORWARD_BATCH_SIZE"] = "bad"
+    assert module._resolve_positive_int_config("CLASSIFIER_PRE_FORWARD_BATCH_SIZE", 7) == 7
 
 
 def test_task_send_input_record_to_classifier_mixed_fake_and_real_batch(monkeypatch, base_fake_config, dummy_logger):

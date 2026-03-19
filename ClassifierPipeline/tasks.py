@@ -87,6 +87,16 @@ def _batch_context_id(records):
         return None
     return records[0].get("perf_metrics_context_id")
 
+
+def _resolve_positive_int_config(name, default):
+    try:
+        value = int(config.get(name, default) or default)
+        if value > 0:
+            return value
+    except (TypeError, ValueError):
+        pass
+    return default
+
 # ============================= TASKS ============================================= #
 
 @app.task(queue="update-record")
@@ -147,9 +157,7 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
         delay_message = config.get('DELAY_MESSAGE', False)
         logger.debug("Delay set for queue messages: {}".format(delay_message))
 
-        classify_batch_size = int(config.get("CLASSIFY_STAGE_BATCH_SIZE", 100) or 100)
-        if classify_batch_size <= 0:
-            classify_batch_size = 100
+        classify_batch_size = _resolve_positive_int_config("CLASSIFY_STAGE_BATCH_SIZE", 100)
 
         normalized_records = []
         logger.debug('Request list: {}'.format(request_list))
@@ -273,21 +281,29 @@ def task_send_input_record_to_classifier(message):
 
             if real_texts:
                 logger.debug('Performing Inference')
-                categories, scores = classifier.batch_score_SciX_categories(
-                    real_texts,
-                    run_id=run_id,
-                    context_id=context_id,
-                    configured_record_batch_size=len(records),
-                    model_inference_batch_size=config.get("MODEL_INFERENCE_BATCH_SIZE"),
+                pre_forward_batch_size = _resolve_positive_int_config(
+                    "CLASSIFIER_PRE_FORWARD_BATCH_SIZE",
+                    len(real_texts),
                 )
-                logger.debug('Categories: {}'.format(categories))
-                logger.debug('Allowed Categories: {}'.format(config['ALLOWED_CATEGORIES']))
-                logger.debug('Scores: {}'.format(scores))
-                for output_index, record_index in enumerate(real_positions):
-                    record = records[record_index]
-                    record['categories'] = categories[output_index]
-                    record['scores'] = scores[output_index]
-                    processed_records[record_index] = record
+                for real_position_batch, real_text_batch in zip(
+                    _chunk_records(real_positions, pre_forward_batch_size),
+                    _chunk_records(real_texts, pre_forward_batch_size),
+                ):
+                    categories, scores = classifier.batch_score_SciX_categories(
+                        real_text_batch,
+                        run_id=run_id,
+                        context_id=context_id,
+                        configured_record_batch_size=len(real_text_batch),
+                        model_inference_batch_size=config.get("MODEL_INFERENCE_BATCH_SIZE"),
+                    )
+                    logger.debug('Categories: {}'.format(categories))
+                    logger.debug('Allowed Categories: {}'.format(config['ALLOWED_CATEGORIES']))
+                    logger.debug('Scores: {}'.format(scores))
+                    for output_index, record_index in enumerate(real_position_batch):
+                        record = records[record_index]
+                        record['categories'] = categories[output_index]
+                        record['scores'] = scores[output_index]
+                        processed_records[record_index] = record
             elif len(real_positions) == 0:
                 logger.info('Skipping inference - generating fake data')
 
