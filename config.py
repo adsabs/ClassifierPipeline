@@ -11,7 +11,7 @@ CLASSIFICATION_PRETRAINED_MODEL_TOKENIZER = "adsabs/ASTROBERT"
 CELERY_INCLUDE = ["ClassifierPipeline.tasks"]
 CELERY_BROKER = "pyamqp://test:test@localhost:5682/classifier_pipeline"
 
-OUTPUT_CELERY_BROKER = "pyamqp://test:test@localhost:5682/master_pipeline" 
+OUTPUT_CELERY_BROKER = "pyamqp://test:test@localhost:5682/master_pipeline"
 OUTPUT_TASKNAME = "adsmp.tasks.task_update_record"
 
 # set to True adds .delay() or .apply_async() to the end of each task
@@ -20,6 +20,14 @@ DELAY_MESSAGE = True
 
 # Return fake data instead of running the model for testing purposes
 FAKE_DATA = False
+
+# Batching configuration
+# Number of records grouped into one classify task payload.
+CLASSIFY_STAGE_BATCH_SIZE = 100
+# Number of real records sent into one classifier preprocessing/inference call.
+CLASSIFIER_PRE_FORWARD_BATCH_SIZE = 100
+# Number of prepared records grouped into one model forward micro-batch.
+MODEL_INFERENCE_BATCH_SIZE = 32
 
 #Data to Skip message from Master Pipeline
 TEST_INPUT_DATA = 'ClassifierPipeline/tests/stub_data/classifier_request.json'
