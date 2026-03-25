@@ -11,6 +11,7 @@ import csv
 import json
 import os
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -55,6 +56,31 @@ def _safe_git_commit() -> Optional[str]:
     except Exception:
         return None
     return None
+
+
+def _collect_runtime_metadata(config: Optional[Dict[str, object]] = None) -> Dict[str, object]:
+    runtime_metadata = {
+        "device": str((config or {}).get("MODEL_DEVICE", "cpu") or "cpu"),
+        "torch_num_threads": None,
+        "torch_num_interop_threads": None,
+        "tokenizer_parallelism": str(
+            os.environ.get(
+                "TOKENIZERS_PARALLELISM",
+                (config or {}).get("TOKENIZERS_PARALLELISM", "false"),
+            )
+        ).strip().lower(),
+        "omp_num_threads": os.environ.get("OMP_NUM_THREADS"),
+        "mkl_num_threads": os.environ.get("MKL_NUM_THREADS"),
+    }
+    astrobert_module = sys.modules.get("ClassifierPipeline.astrobert_classification")
+    if astrobert_module is not None:
+        metadata_fn = getattr(astrobert_module, "get_runtime_metadata", None)
+        if callable(metadata_fn):
+            try:
+                runtime_metadata.update(metadata_fn() or {})
+            except Exception:
+                pass
+    return runtime_metadata
 
 
 def _read_dataset(records_path: str) -> List[Dict[str, str]]:
@@ -232,6 +258,7 @@ def _run_case(
         "timestamp_utc": _utc_timestamp(),
         "perf_metrics_context_id": metrics_context_id,
     }
+    summary["runtime_metadata"] = _collect_runtime_metadata(config=config)
 
     summary["counts"]["records_submitted"] = submitted
     summary["counts"]["records_indexed"] = completion["records_indexed"]

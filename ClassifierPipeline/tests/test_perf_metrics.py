@@ -263,6 +263,14 @@ def test_render_markdown_includes_system_load(tmp_path):
     output_path = tmp_path / "report.md"
     summary = {
         "status": "complete",
+        "runtime_metadata": {
+            "device": "cpu",
+            "torch_num_threads": 4,
+            "torch_num_interop_threads": 1,
+            "tokenizer_parallelism": "false",
+            "omp_num_threads": "4",
+            "mkl_num_threads": "4",
+        },
         "throughput": {
             "overall_records_per_minute": 100.0,
             "host_load_adjustment_factor": 1.2,
@@ -290,6 +298,8 @@ def test_render_markdown_includes_system_load(tmp_path):
 
     perf_metrics.render_markdown(summary, str(output_path))
     content = output_path.read_text()
+    assert "## Runtime Metadata" in content
+    assert "`cpu`" in content
     assert "## System Load" in content
     assert "Load-Adjusted Throughput" in content
     assert "## Task Timing (ms)" in content

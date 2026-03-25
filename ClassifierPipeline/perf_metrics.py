@@ -773,6 +773,7 @@ def render_markdown(summary: Dict[str, Any], output_path: str) -> None:
     system_load_collection = system_load.get("collection", {}) or {}
     system_load_summary = system_load.get("summary", {}) or {}
     gate = summary.get("gate", {}) or {}
+    runtime_metadata = summary.get("runtime_metadata", {}) or {}
 
     lines = [
         "# Throughput Benchmark Report",
@@ -784,6 +785,19 @@ def render_markdown(summary: Dict[str, Any], output_path: str) -> None:
     run_metadata = summary.get("run_metadata", {}) or {}
     for key in sorted(run_metadata.keys()):
         lines.append(f"- **{key}**: `{run_metadata[key]}`")
+
+    if runtime_metadata:
+        lines.extend([
+            "",
+            "## Runtime Metadata",
+            "",
+            f"- **device**: `{runtime_metadata.get('device', 'n/a')}`",
+            f"- **torch_num_threads**: `{runtime_metadata.get('torch_num_threads', 'n/a')}`",
+            f"- **torch_num_interop_threads**: `{runtime_metadata.get('torch_num_interop_threads', 'n/a')}`",
+            f"- **tokenizer_parallelism**: `{runtime_metadata.get('tokenizer_parallelism', 'n/a')}`",
+            f"- **omp_num_threads**: `{runtime_metadata.get('omp_num_threads', 'n/a')}`",
+            f"- **mkl_num_threads**: `{runtime_metadata.get('mkl_num_threads', 'n/a')}`",
+        ])
 
     lines.extend([
         "",

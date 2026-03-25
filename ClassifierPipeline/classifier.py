@@ -54,6 +54,22 @@ class Classifier:
         self.labels = self.classifier.labels
         self.id2label = self.classifier.id2label
         self.label2id = self.classifier.label2id
+        runtime_metadata = getattr(self.classifier, "runtime_metadata", {}) or {}
+        self.model_device = str(runtime_metadata.get("device", "cpu") or "cpu")
+
+    def _inference_context(self):
+        inference_mode = getattr(torch, "inference_mode", None)
+        if callable(inference_mode):
+            return inference_mode()
+        return torch.no_grad()
+
+    def _move_tensor_to_model_device(self, tensor_value):
+        if self.model_device == "cpu":
+            return tensor_value
+        tensor_to = getattr(tensor_value, "to", None)
+        if callable(tensor_to):
+            return tensor_to(self.model_device)
+        return tensor_value
 
     # split tokenized text into chunks for the model
     def input_ids_splitter(self, input_ids, window_size=510, window_stride=255):
@@ -406,10 +422,12 @@ class Classifier:
         label_lookup = self.id2label
         
         # forward call
-        with torch.no_grad():
+        with self._inference_context():
             for micro_batch in micro_batches:
                 prep_start = time.perf_counter()
                 input_ids_tensor, attention_mask_tensor, record_row_counts, _shape_info = self._build_micro_batch_tensors(micro_batch)
+                input_ids_tensor = self._move_tensor_to_model_device(input_ids_tensor)
+                attention_mask_tensor = self._move_tensor_to_model_device(attention_mask_tensor)
                 micro_batch_tensor_prep_ms += (time.perf_counter() - prep_start) * 1000.0
 
                 logger.debug('Making predictions')

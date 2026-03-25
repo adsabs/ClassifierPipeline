@@ -27,7 +27,11 @@ CLASSIFY_STAGE_BATCH_SIZE = 100
 # Number of real records sent into one classifier preprocessing/inference call.
 CLASSIFIER_PRE_FORWARD_BATCH_SIZE = 100
 # Number of prepared records grouped into one model forward micro-batch.
-MODEL_INFERENCE_BATCH_SIZE = 32
+MODEL_INFERENCE_BATCH_SIZE = 16
+MODEL_DEVICE = "cpu"
+MODEL_NUM_THREADS = None
+MODEL_NUM_INTEROP_THREADS = None
+TOKENIZERS_PARALLELISM = False
 
 #Data to Skip message from Master Pipeline
 TEST_INPUT_DATA = 'ClassifierPipeline/tests/stub_data/classifier_request.json'

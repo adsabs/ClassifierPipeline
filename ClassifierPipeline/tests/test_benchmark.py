@@ -89,6 +89,18 @@ def test_run_case_includes_system_load(monkeypatch):
             "memory_available_ratio": 0.25,
         },
     )
+    monkeypatch.setattr(
+        benchmark,
+        "_collect_runtime_metadata",
+        lambda config=None: {
+            "device": "cpu",
+            "torch_num_threads": 4,
+            "torch_num_interop_threads": 1,
+            "tokenizer_parallelism": "false",
+            "omp_num_threads": "4",
+            "mkl_num_threads": "4",
+        },
+    )
 
     import ClassifierPipeline
     monkeypatch.setitem(sys.modules, "ClassifierPipeline.tasks", dummy_tasks)
@@ -109,6 +121,7 @@ def test_run_case_includes_system_load(monkeypatch):
     )
 
     assert "system_load" in summary
+    assert summary["runtime_metadata"]["device"] == "cpu"
     assert summary["system_load"]["collection"]["enabled"] is True
     assert summary["throughput"]["load_adjusted_records_per_minute"] >= summary["throughput"]["overall_records_per_minute"]
 
@@ -144,6 +157,18 @@ def test_run_case_disable_system_load(monkeypatch):
             "status": "complete",
         },
     )
+    monkeypatch.setattr(
+        benchmark,
+        "_collect_runtime_metadata",
+        lambda config=None: {
+            "device": "cpu",
+            "torch_num_threads": None,
+            "torch_num_interop_threads": None,
+            "tokenizer_parallelism": "false",
+            "omp_num_threads": None,
+            "mkl_num_threads": None,
+        },
+    )
 
     import ClassifierPipeline
     monkeypatch.setitem(sys.modules, "ClassifierPipeline.tasks", dummy_tasks)
@@ -163,4 +188,5 @@ def test_run_case_disable_system_load(monkeypatch):
     )
 
     assert summary["system_load"]["collection"]["enabled"] is False
+    assert summary["runtime_metadata"]["tokenizer_parallelism"] == "false"
     assert summary["throughput"]["host_load_adjustment_factor"] == 1.0

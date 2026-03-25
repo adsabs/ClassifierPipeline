@@ -98,6 +98,10 @@ class FakeNoGrad:
         return False
 
 
+class FakeInferenceMode(FakeNoGrad):
+    pass
+
+
 def assert_nested_approx(actual, expected, rel=1e-6):
     assert len(actual) == len(expected)
     for actual_row, expected_row in zip(actual, expected):
@@ -110,6 +114,7 @@ def _import_classifier(monkeypatch, base_fake_config, dummy_logger, fake_wrapper
 
     fake_torch = types.ModuleType("torch")
     fake_torch.no_grad = lambda: FakeNoGrad()
+    fake_torch.inference_mode = lambda: FakeInferenceMode()
     fake_torch.tensor = lambda values, dtype=None: FakeTensor(values)
     fake_torch.long = "long"
 
@@ -245,6 +250,43 @@ def test_batch_score_with_mean_combiner(monkeypatch, base_fake_config, dummy_log
     )
     assert scores[0] == pytest.approx([0.5, 0.5], rel=1e-5)
     assert categories == [["Heliophysics"]]
+
+
+def test_batch_score_prefers_inference_mode_when_available(monkeypatch, base_fake_config, dummy_logger):
+    tokenizer = FakeTokenizer(token_ids=[[1, 2, 3]])
+    model = FakeModel([FakeTensor([[0.0, 0.0]])])
+
+    class FakeWrapper:
+        def __init__(self):
+            self.tokenizer = tokenizer
+            self.model = model
+            self.labels = ["Astronomy", "Heliophysics"]
+            self.id2label = {0: "Astronomy", 1: "Heliophysics"}
+            self.label2id = {"Astronomy": 0, "Heliophysics": 1}
+
+    monkeypatch.setattr("adsputils.load_config", lambda proj_home=None: dict(base_fake_config))
+    monkeypatch.setattr("adsputils.setup_logging", lambda *args, **kwargs: dummy_logger)
+
+    fake_torch = types.ModuleType("torch")
+    fake_torch.no_grad = lambda: (_ for _ in ()).throw(AssertionError("torch.no_grad should not be used when inference_mode exists"))
+    fake_torch.inference_mode = lambda: FakeInferenceMode()
+    fake_torch.tensor = lambda values, dtype=None: FakeTensor(values)
+    fake_torch.long = "long"
+
+    fake_astrobert = types.ModuleType("ClassifierPipeline.astrobert_classification")
+    fake_astrobert.AstroBERTClassification = FakeWrapper
+
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+    monkeypatch.setitem(sys.modules, "ClassifierPipeline.astrobert_classification", fake_astrobert)
+    sys.modules.pop("ClassifierPipeline.classifier", None)
+    module = importlib.import_module("ClassifierPipeline.classifier")
+
+    classifier = module.Classifier()
+    classifier.batch_score_SciX_categories(
+        ["doc1"],
+        score_thresholds=[0.5, 0.5],
+        model_inference_batch_size=1,
+    )
 
 
 def test_batch_score_applies_thresholds(monkeypatch, base_fake_config, dummy_logger):
