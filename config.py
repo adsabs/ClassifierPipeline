@@ -29,8 +29,8 @@ CLASSIFIER_PRE_FORWARD_BATCH_SIZE = 100
 # Number of prepared records grouped into one model forward micro-batch.
 MODEL_INFERENCE_BATCH_SIZE = 16
 MODEL_DEVICE = "cpu"
-MODEL_NUM_THREADS = None
-MODEL_NUM_INTEROP_THREADS = None
+MODEL_NUM_THREADS = 4
+MODEL_NUM_INTEROP_THREADS = 1
 TOKENIZERS_PARALLELISM = False
 
 #Data to Skip message from Master Pipeline
