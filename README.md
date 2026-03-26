@@ -28,9 +28,9 @@ For a bibcode:
 ```
 python run.py -s -b bibcode
 ```
-For a SciX ID:
+For a SciXID:
 ```
-python run.py -s -x SciX ID
+python run.py -s -x SciXID
 ```
 For a Classification batch:
 ```
@@ -42,7 +42,7 @@ If calling the classifier from the Master Pipeline:
 ```
 python run.py --classify --manual -n path/to/file.csv
 ```
-If called using `--classify` the classifications are indexed immediately.  TO allow a curator inspection of the results before indexing use `--classify_verify`.  
+If called using `--classify` the classifications are indexed immediately.  To allow a curator inspection of the results before indexing use `--classify_verify`.  
 
 ### Benchmarking
 Production-like throughput profiling is available via:
@@ -68,3 +68,32 @@ Environment flags used by workers for profiling:
 - `PERF_METRICS_ENABLED=true`
 - `PERF_METRICS_PATH=/absolute/path/to/perf_events.jsonl`
 - `PERF_FORCE_FAKE_DATA=true|false` (controls fake/real inference mode per worker process)
+
+### Attached Benchmarking
+
+There are now two wrapper layers for benchmark execution:
+
+1. an in-container runner:
+```
+/app/scripts/run-in-container-benchmark.bash \
+  --dataset /app/logs/2023Sci_titles_abstracts_200.csv \
+  --model-inference-batch-size 16 \
+  --model-num-threads 4 \
+  --model-num-interop-threads 1
+```
+
+2. an attach-only host wrapper for already-running classifier containers:
+```
+bash /Users/thomasallen/Code/ADS/ADSIngestPipelineTestEnvironment/run-attached-classifier-benchmark.bash \
+  --container classifier_pipeline \
+  --model-inference-batch-size 16 \
+  --model-num-threads 4 \
+  --model-num-interop-threads 1
+```
+
+The host wrapper:
+- requires an explicit target container
+- does not restart or tear down services
+- captures host context separately from benchmark runtime metadata
+- writes a host-side manifest plus translated host paths for `/app` artifacts when that mount is detectable
+
