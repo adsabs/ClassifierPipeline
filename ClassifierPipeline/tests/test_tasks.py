@@ -151,6 +151,22 @@ def test_task_update_record_reuses_existing_run_id(monkeypatch, base_fake_config
     assert result["run_id"] == "EXISTING"
 
 
+def test_task_update_record_pre_ingest_skips_index_run(monkeypatch, base_fake_config, dummy_logger):
+    module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
+    module.utils.prepare_output_file = lambda path: None
+    module.utils.classifyRequestRecordList_to_list = lambda message: [dict(message)]
+    module.utils.list_to_ClassifyRequestRecordList = lambda payload: payload
+    module.perf_metrics.emit_event = lambda **kwargs: None
+    module.app.index_run = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("pre_ingest should not index run"))
+    forwarded = []
+    module.task_send_input_record_to_classifier = lambda message: forwarded.append(message)
+
+    result = module.task_update_record({"title": "T", "abstract": "A", "operation_step": "pre_ingest"})
+    assert result["records_submitted"] == 1
+    assert result["run_id"].startswith("pre-ingest-")
+    assert forwarded[0][0]["operation_step"] == "pre_ingest"
+
+
 def test_task_update_record_uses_delay_when_enabled(monkeypatch, base_fake_config, dummy_logger):
     module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
     module.config["DELAY_MESSAGE"] = True
@@ -476,6 +492,31 @@ def test_task_index_classified_record_flushes_touched_output_paths_once_per_batc
             {"bibcode": "B2", "operation_step": "classify_verify", "run_id": "R", "output_path": "out.tsv"},
         ]
     )
+    assert flushed == ["out.tsv"]
+
+
+def test_task_index_classified_record_pre_ingest_writes_output_only(monkeypatch, base_fake_config, dummy_logger):
+    module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
+    module.utils.classifyRequestRecordList_to_list = lambda message: [dict(item) for item in message]
+    module.perf_metrics.emit_event = lambda **kwargs: None
+    module.app.index_record = lambda record: (_ for _ in ()).throw(AssertionError("pre_ingest should not index records"))
+    module.app.index_records_batch = lambda records: (_ for _ in ()).throw(AssertionError("pre_ingest should not batch index"))
+    written = []
+    resent = []
+    flushed = []
+    module.utils.add_record_to_output_file = lambda record: written.append(record["title"])
+    module.utils.flush_output_file = lambda output_path=None: flushed.append(output_path)
+    module.task_resend_to_master = lambda message: resent.append(message)
+
+    module.task_index_classified_record(
+        [
+            {"title": "T1", "operation_step": "pre_ingest", "run_id": "R", "output_path": "out.tsv"},
+            {"title": "T2", "operation_step": "pre_ingest", "run_id": "R", "output_path": "out.tsv"},
+        ]
+    )
+
+    assert written == ["T1", "T2"]
+    assert resent == []
     assert flushed == ["out.tsv"]
 
 

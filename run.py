@@ -117,6 +117,33 @@ def row_to_dictionary(row):
     return record
 
 
+def pre_ingest_row_to_dictionary(row, output_path=None):
+    """
+    Convert a pre-ingest TSV row into a minimal request dictionary.
+
+    Parameters
+    ----------
+    row : list[str]
+        A row with at least two elements: [title, abstract]
+
+    Returns
+    -------
+    dict
+        Dictionary with keys:
+          - 'title'
+          - 'abstract'
+          - 'operation_step'
+    """
+    record = {
+        'title': row[0],
+        'abstract': row[1],
+        'operation_step': 'pre_ingest',
+    }
+    if output_path:
+        record['output_path'] = output_path
+    return record
+
+
 def batch_new_records(records_path, batch_size=500):
     """
     Read a CSV of new records and enqueue messages in batches.
@@ -168,6 +195,67 @@ def batch_new_records(records_path, batch_size=500):
             # new_batch = message_to_list(message)
             # import pdb;pdb.set_trace()
             task_update_record.delay(message)
+
+
+def batch_pre_ingest_records(records_path, batch_size=500):
+    """
+    Read a TSV of pre-ingest records and enqueue messages in batches.
+
+    Parameters
+    ----------
+    records_path : str
+        Path to a tab-delimited file containing title and abstract columns.
+        The file may optionally include a header row.
+    batch_size : int, default 500
+        Number of rows per message batch.
+    """
+    batch = []
+    possible_headers = ['title']
+    output_name = os.path.basename(records_path)
+
+    with open(records_path, 'r') as file:
+        reader = csv.reader(file, delimiter='\t')
+
+        first_row = next(reader)
+        if first_row and str(first_row[0]).lower() in possible_headers:
+            print("Header detected:", first_row)
+        else:
+            print("No header found, processing first row as data.")
+            batch.append(pre_ingest_row_to_dictionary(first_row, output_path=output_name))
+
+        for i, row in enumerate(reader, 1):
+            batch.append(pre_ingest_row_to_dictionary(row, output_path=output_name))
+
+            if i % batch_size == 0:
+                print(f"Processing batch {i // batch_size}")
+                message = utils.list_to_ClassifyRequestRecordList(batch)
+                task_update_record.delay(message)
+                batch = []
+
+        if batch:
+            print("Processing final batch")
+            message = utils.list_to_ClassifyRequestRecordList(batch)
+            task_update_record.delay(message)
+
+
+def queue_pre_ingest_input_text(text):
+    """
+    Submit a single pre-ingest record built from inline text.
+
+    Parameters
+    ----------
+    text : str
+        Free-form text to classify. Stored as the abstract with blank title.
+    """
+    message = utils.list_to_ClassifyRequestRecordList([
+        {
+            'title': '',
+            'abstract': text,
+            'operation_step': 'pre_ingest',
+            'output_path': 'input-text',
+        }
+    ])
+    task_update_record.delay(message)
 
 
 def records2_fake_protobuf(record):
@@ -229,6 +317,8 @@ def prepare_records(records_path, operation_step='validate'):
     with open(records_path, 'r') as f:
         csv_reader = csv.reader(f, delimiter='\t')
         headers = next(csv_reader)
+        header_positions = {name: index for index, name in enumerate(headers)}
+        override_index = header_positions.get('override', 14)
 
         for row in csv_reader:
             print(f'Processing row: {row}')
@@ -241,22 +331,14 @@ def prepare_records(records_path, operation_step='validate'):
             record['title'] = row[3]
             record['operation_step'] = operation_step
 
-            record['override'] = row[14].split(',')
+            record['override'] = row[override_index].split(',')
             print(f'validating record: {record}')
             logger.info(f'validating record: {record}')
             message = utils.list_to_ClassifyRequestRecordList([record])
             task_index_classified_record(message)
 
 
-
-# =============================== MAIN ======================================= #
-
-# To test the classifier
-# python run.py -n -r ClassifierPipeline/tests/stub_data/stub_new_records.csv
-
-if __name__ == '__main__':
-
-    print('Run.py - parsing input')
+def build_parser():
     parser = argparse.ArgumentParser(description='Process user input.')
 
     parser.add_argument('-n',
@@ -271,12 +353,22 @@ if __name__ == '__main__':
                         action='store_true',
                         help='Return list to manually validate classifications')
 
+    parser.add_argument('-p',
+                        '--pre-ingest',
+                        dest='pre_ingest',
+                        action='store_true',
+                        help='Classify title/abstract records without indexing or forwarding')
+
     parser.add_argument('-r',
                         '--records',
                         dest='records',
                         action='store',
-                        help='Path to comma delimited list of new records' +
-                             'to process: columns: bibcode, title, abstract')
+                        help='Path to input records')
+
+    parser.add_argument('--input-text',
+                        dest='input_text',
+                        action='store',
+                        help='Inline text segment to classify through the pre-ingest pipeline')
 
     parser.add_argument('-t',
                         '--test',
@@ -308,21 +400,42 @@ if __name__ == '__main__':
                         action='store',
                         help='Run_id of record batch to resend')
 
+    return parser
 
-    args = parser.parse_args()
 
+def _validate_args(parser, args):
+    if args.pre_ingest:
+        if bool(args.records) == bool(args.input_text):
+            parser.error('`--pre-ingest` requires exactly one of `--records` or `--input-text`.')
+    elif args.input_text:
+        parser.error('`--input-text` is only supported with `--pre-ingest`.')
+
+
+def main(argv=None):
+    print('Run.py - parsing input')
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    _validate_args(parser, args)
+
+    records_path = args.records if args.records else None
 
     if args.records:
-        records_path = args.records
         print(records_path)
 
     if args.validate:
         print("Validating records")
-        prepare_records(records_path,operation_step='validate')
+        prepare_records(records_path, operation_step='validate')
 
     if args.new_records:
         print("Processing new records")
         batch_new_records(records_path)
+
+    if args.pre_ingest:
+        print("Processing pre-ingest records")
+        if args.records:
+            batch_pre_ingest_records(records_path)
+        else:
+            queue_pre_ingest_input_text(args.input_text)
 
     if args.bibcode:
         print('Resending bibcode')
@@ -389,5 +502,15 @@ if __name__ == '__main__':
         else:
             message = task_update_record(message,pipeline='test')
 
-
     logger.info("Done - run.py")
+    return args
+
+
+
+# =============================== MAIN ======================================= #
+
+# To test the classifier
+# python run.py -n -r ClassifierPipeline/tests/stub_data/stub_new_records.csv
+
+if __name__ == '__main__':
+    main()

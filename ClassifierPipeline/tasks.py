@@ -97,6 +97,11 @@ def _resolve_positive_int_config(name, default):
         pass
     return default
 
+
+def _generate_run_id(operation_step=None):
+    prefix = "pre-ingest" if operation_step == "pre_ingest" else "run"
+    return f"{prefix}-{int(time.time() * 1000)}"
+
 # ============================= TASKS ============================================= #
 
 @app.task(queue="update-record")
@@ -119,8 +124,15 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
     request_list = utils.classifyRequestRecordList_to_list(message)
     context_id = _batch_context_id(request_list)
 
+    if 'operation_step' in request_list[0]:
+        operation_step = request_list[0]['operation_step']
+    else:
+        operation_step = config.get('OPERATION_STEP', 'classify_verify')
+
     if request_list and request_list[0].get("run_id"):
         run_id = request_list[0].get("run_id")
+    elif operation_step == "pre_ingest":
+        run_id = _generate_run_id(operation_step=operation_step)
     else:
         run_id = app.index_run(perf_metrics_context_id=context_id)
 
@@ -135,12 +147,7 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
     ):
         logger.info('Run ID: {}'.format(run_id))
 
-        if 'operation_step' in request_list[0]:
-            operation_step = request_list[0]['operation_step']
-        else:
-            operation_step = config.get('OPERATION_STEP', 'classify_verify')
-
-        if 'output_path' in request_list[0]:
+        if request_list[0].get('output_path'):
             try:
                 filename = request_list[0]['output_path']
                 filename = filename.split('/')[-1]
@@ -380,6 +387,8 @@ def task_index_classified_record(message):
         results = []
         if records and all(record.get("operation_step") in {"classify", "classify_verify"} for record in records):
             results = app.index_records_batch(records)
+        elif records and all(record.get("operation_step") == "pre_ingest" for record in records):
+            results = [(record, "record_pre_ingested") for record in records]
         else:
             for record in records:
                 results.append(app.index_record(record))
@@ -419,6 +428,11 @@ def task_index_classified_record(message):
                     resend_message = utils.list_to_ClassifyRequestRecordList([record])
                     task_resend_to_master(resend_message)
                     logger.info(f"Record {record_id} sent to master")
+            elif success == "record_pre_ingested":
+                logger.info(f"Record {record_id or record.get('title') or record.get('run_id')} pre-ingested")
+                utils.add_record_to_output_file(record)
+                if record.get("output_path"):
+                    touched_output_paths.add(record["output_path"])
 
             elif success == "record_validated":
                 resend_message = utils.list_to_ClassifyRequestRecordList([record])

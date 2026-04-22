@@ -48,6 +48,8 @@ def test_prepare_output_file_writes_header(monkeypatch, base_fake_config, dummy_
     module.prepare_output_file(str(output))
     text = output.read_text()
     assert text.startswith("bibcode\tscix_id\trun_id\ttitle\tcollections")
+    assert "astrophysics_score" in text
+    assert "gross_collection" in text
 
 
 def test_add_record_to_output_file_appends_row(monkeypatch, base_fake_config, dummy_logger, tmp_path):
@@ -69,6 +71,10 @@ def test_add_record_to_output_file_appends_row(monkeypatch, base_fake_config, du
     lines = output.read_text().strip().splitlines()
     assert len(lines) == 2
     assert lines[1].startswith("B\tS\tR\tTitle\tAstronomy, Other")
+    columns = lines[1].split("\t")
+    assert columns[6:10] == ["0.61", "0.2", "0.4", "0.61"]
+    assert columns[10:15] == ["0.5", "0.1", "0.35", "0.21", "0.5"]
+    assert columns[15:17] == ["0.1", "astronomy"]
 
 
 def test_add_record_to_output_file_buffers_until_threshold(monkeypatch, base_fake_config, dummy_logger, tmp_path):
@@ -89,7 +95,7 @@ def test_add_record_to_output_file_buffers_until_threshold(monkeypatch, base_fak
         current = dict(record, bibcode=f"B{index}")
         module.add_record_to_output_file(current)
     assert output.read_text().strip().splitlines() == [
-        "bibcode\tscix_id\trun_id\ttitle\tcollections\tcollection_scores\tastronomy_score\theliophysics_score\tplanetary_science_score\tearth_science_score\tbiology_score\tphysics_score\tother_score\tgarbage_score\toverride"
+        "bibcode\tscix_id\trun_id\ttitle\tcollections\tcollection_scores\tastrophysics_score\theliophysics_score\tplanetary_science_score\tastronomy_score\tearth_science_score\tbiology_score\tphysics_score\tother_score\tgeneral_score\tgarbage_score\tgross_collection\toverride"
     ]
 
 
@@ -150,6 +156,23 @@ def test_prepare_output_file_resets_existing_buffer(monkeypatch, base_fake_confi
     module.prepare_output_file(str(output))
     module.flush_output_file(str(output))
     assert len(output.read_text().strip().splitlines()) == 1
+
+
+def test_build_output_row_uses_blank_identifiers_and_derived_scores(monkeypatch, base_fake_config, dummy_logger):
+    module = _import_utilities(monkeypatch, base_fake_config, dummy_logger)
+    row = module.build_output_row(
+        {
+            "title": "Title",
+            "run_id": "R",
+            "collections": ["Other Physics"],
+            "collection_scores": [0.81],
+            "scores": [0.12, 0.23, 0.34, 0.91, 0.45, 0.81, 0.67, 0.05],
+        }
+    )
+    assert row[:4] == ["", "", "R", "Title"]
+    assert row[6:10] == [0.12, 0.23, 0.34, 0.34]
+    assert row[10:15] == [0.91, 0.45, 0.81, 0.67, 0.91]
+    assert row[15:17] == [0.05, "general"]
 
 
 def test_buffering_is_isolated_per_output_path(monkeypatch, base_fake_config, dummy_logger, tmp_path):

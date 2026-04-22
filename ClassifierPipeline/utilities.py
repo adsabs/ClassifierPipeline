@@ -45,6 +45,27 @@ _OUTPUT_ROW_BUFFERS = {}
 _OUTPUT_BUFFER_FLUSH_EVERY = 25
 _OUTPUT_FLUSH_REGISTERED = False
 
+OUTPUT_HEADER = [
+    'bibcode',
+    'scix_id',
+    'run_id',
+    'title',
+    'collections',
+    'collection_scores',
+    'astrophysics_score',
+    'heliophysics_score',
+    'planetary_science_score',
+    'astronomy_score',
+    'earth_science_score',
+    'biology_score',
+    'physics_score',
+    'other_score',
+    'general_score',
+    'garbage_score',
+    'gross_collection',
+    'override',
+]
+
 
 def classify_record_from_scores(record):
     """
@@ -119,11 +140,9 @@ def prepare_output_file(output_path):
     logger.info('Preparing output file - utilities.py')
     global _OUTPUT_FLUSH_REGISTERED
 
-    header = ['bibcode','scix_id','run_id','title','collections','collection_scores','astronomy_score','heliophysics_score','planetary_science_score','earth_science_score','biology_score','physics_score','other_score','garbage_score','override']
-
     with open(output_path, 'w', newline='') as file:
         writer = csv.writer(file, delimiter='\t')
-        writer.writerow(header)
+        writer.writerow(OUTPUT_HEADER)
     _OUTPUT_ROW_BUFFERS.pop(output_path, None)
     if not _OUTPUT_FLUSH_REGISTERED:
         atexit.register(flush_output_file)
@@ -170,13 +189,80 @@ def add_record_to_output_file(record):
     -----
     The row is written in tab-delimited format.
     """
-    row = [record['bibcode'], record['scix_id'],record['run_id'],record['title'],', '.join(record['collections']), ', '.join(map(str, record['collection_scores'])), round(record['scores'][0],2), round(record['scores'][1],2), round(record['scores'][2],2), round(record['scores'][3],2), round(record['scores'][4],2), round(record['scores'][5],2), round(record['scores'][6],2), round(record['scores'][7],2), '']
+    row = build_output_row(record)
 
     logger.debug(f'Writing {row}')
     output_path = record['output_path']
     _OUTPUT_ROW_BUFFERS.setdefault(output_path, []).append(row)
     if len(_OUTPUT_ROW_BUFFERS[output_path]) >= _OUTPUT_BUFFER_FLUSH_EVERY:
         flush_output_file(output_path)
+
+
+def _safe_score(scores, index):
+    try:
+        return round(float(scores[index]), 2)
+    except (IndexError, TypeError, ValueError):
+        return 0.0
+
+
+def _derive_summary_scores(scores):
+    astrophysics_score = _safe_score(scores, 0)
+    heliophysics_score = _safe_score(scores, 1)
+    planetary_science_score = _safe_score(scores, 2)
+    earth_science_score = _safe_score(scores, 3)
+    biology_score = _safe_score(scores, 4)
+    physics_score = _safe_score(scores, 5)
+    other_score = _safe_score(scores, 6)
+    garbage_score = _safe_score(scores, 7)
+
+    astronomy_score = round(max(astrophysics_score, heliophysics_score, planetary_science_score), 2)
+    general_score = round(max(earth_science_score, biology_score, other_score), 2)
+    gross_collection = max(
+        [
+            ("astronomy", astronomy_score),
+            ("physics", physics_score),
+            ("general", general_score),
+        ],
+        key=lambda item: item[1],
+    )[0]
+
+    return {
+        "astrophysics_score": astrophysics_score,
+        "heliophysics_score": heliophysics_score,
+        "planetary_science_score": planetary_science_score,
+        "astronomy_score": astronomy_score,
+        "earth_science_score": earth_science_score,
+        "biology_score": biology_score,
+        "physics_score": physics_score,
+        "other_score": other_score,
+        "general_score": general_score,
+        "garbage_score": garbage_score,
+        "gross_collection": gross_collection,
+    }
+
+
+def build_output_row(record):
+    scores = _derive_summary_scores(record.get('scores', []))
+    return [
+        record.get('bibcode') or '',
+        record.get('scix_id') or '',
+        record.get('run_id') or '',
+        record.get('title') or '',
+        ', '.join(record.get('collections') or []),
+        ', '.join(map(str, record.get('collection_scores') or [])),
+        scores['astrophysics_score'],
+        scores['heliophysics_score'],
+        scores['planetary_science_score'],
+        scores['astronomy_score'],
+        scores['earth_science_score'],
+        scores['biology_score'],
+        scores['physics_score'],
+        scores['other_score'],
+        scores['general_score'],
+        scores['garbage_score'],
+        scores['gross_collection'],
+        '',
+    ]
 
 
 def check_is_allowed_category(categories_list):
@@ -438,5 +524,4 @@ def check_identifier(identifier):
         return 'scix_id'
     else:
         return 'bibcode'
-
 
