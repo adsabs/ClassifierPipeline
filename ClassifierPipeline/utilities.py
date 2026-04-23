@@ -202,6 +202,7 @@ def _safe_score(scores, index):
     try:
         return round(float(scores[index]), 2)
     except (IndexError, TypeError, ValueError):
+        logger.debug(f"Unable to parse score at index {index} from payload: {scores!r}")
         return 0.0
 
 
@@ -524,4 +525,3 @@ def check_identifier(identifier):
         return 'scix_id'
     else:
         return 'bibcode'
-

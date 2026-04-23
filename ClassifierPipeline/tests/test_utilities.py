@@ -175,6 +175,43 @@ def test_build_output_row_uses_blank_identifiers_and_derived_scores(monkeypatch,
     assert row[15:17] == [0.05, "general"]
 
 
+def test_build_output_row_gross_collection_tie_breaks_to_astronomy(monkeypatch, base_fake_config, dummy_logger):
+    module = _import_utilities(monkeypatch, base_fake_config, dummy_logger)
+    row = module.build_output_row(
+        {
+            "title": "Tie",
+            "run_id": "R",
+            "collections": [],
+            "collection_scores": [],
+            "scores": [0.5, 0.4, 0.3, 0.5, 0.4, 0.5, 0.2, 0.1],
+        }
+    )
+    assert row[9] == 0.5
+    assert row[12] == 0.5
+    assert row[14] == 0.5
+    assert row[16] == "astronomy"
+
+
+def test_safe_score_logs_debug_and_returns_zero_on_bad_payload(monkeypatch, base_fake_config, dummy_logger):
+    module = _import_utilities(monkeypatch, base_fake_config, dummy_logger)
+    debug_messages = []
+    monkeypatch.setattr(
+        module,
+        "logger",
+        types.SimpleNamespace(
+            debug=lambda message: debug_messages.append(message),
+            info=lambda *args, **kwargs: None,
+            warning=lambda *args, **kwargs: None,
+            error=lambda *args, **kwargs: None,
+            exception=lambda *args, **kwargs: None,
+        ),
+        raising=True,
+    )
+    assert module._safe_score(["bad"], 0) == 0.0
+    assert debug_messages
+    assert "Unable to parse score at index 0" in debug_messages[0]
+
+
 def test_buffering_is_isolated_per_output_path(monkeypatch, base_fake_config, dummy_logger, tmp_path):
     module = _import_utilities(monkeypatch, base_fake_config, dummy_logger)
     output_one = tmp_path / "one.tsv"

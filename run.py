@@ -65,6 +65,7 @@ import time
 import json
 import argparse
 import copy
+import itertools
 from ClassifierPipeline.tasks import task_update_record, task_update_validated_records, task_index_classified_record, task_resend_to_master
 # import ClassifierPipeline.tasks as tasks
 # from ClassifierPipeline.utilities import check_is_allowed_category
@@ -134,6 +135,9 @@ def pre_ingest_row_to_dictionary(row, output_path=None):
           - 'abstract'
           - 'operation_step'
     """
+    if len(row) < 2:
+        raise ValueError(f"Expected 2 columns, got {len(row)}: {row!r}")
+
     record = {
         'title': row[0],
         'abstract': row[1],
@@ -142,6 +146,14 @@ def pre_ingest_row_to_dictionary(row, output_path=None):
     if output_path:
         record['output_path'] = output_path
     return record
+
+
+def is_pre_ingest_header(row):
+    if len(row) < 2:
+        return False
+    first = str(row[0]).strip().lower()
+    second = str(row[1]).strip().lower()
+    return first == 'title' and second in {'abstract', 'text', 'body'}
 
 
 def batch_new_records(records_path, batch_size=500):
@@ -197,7 +209,7 @@ def batch_new_records(records_path, batch_size=500):
             task_update_record.delay(message)
 
 
-def batch_pre_ingest_records(records_path, batch_size=500):
+def batch_pre_ingest_records(records_path, batch_size=500, output_prefix=None):
     """
     Read a TSV of pre-ingest records and enqueue messages in batches.
 
@@ -210,20 +222,20 @@ def batch_pre_ingest_records(records_path, batch_size=500):
         Number of rows per message batch.
     """
     batch = []
-    possible_headers = ['title']
-    output_name = os.path.basename(records_path)
+    output_name = output_prefix or os.path.basename(records_path)
 
     with open(records_path, 'r') as file:
         reader = csv.reader(file, delimiter='\t')
 
         first_row = next(reader)
-        if first_row and str(first_row[0]).lower() in possible_headers:
+        rows = reader
+        if is_pre_ingest_header(first_row):
             print("Header detected:", first_row)
         else:
             print("No header found, processing first row as data.")
-            batch.append(pre_ingest_row_to_dictionary(first_row, output_path=output_name))
+            rows = itertools.chain([first_row], reader)
 
-        for i, row in enumerate(reader, 1):
+        for i, row in enumerate(rows, 1):
             batch.append(pre_ingest_row_to_dictionary(row, output_path=output_name))
 
             if i % batch_size == 0:
@@ -238,7 +250,7 @@ def batch_pre_ingest_records(records_path, batch_size=500):
             task_update_record.delay(message)
 
 
-def queue_pre_ingest_input_text(text):
+def queue_pre_ingest_input_text(text, output_prefix=None):
     """
     Submit a single pre-ingest record built from inline text.
 
@@ -252,7 +264,7 @@ def queue_pre_ingest_input_text(text):
             'title': '',
             'abstract': text,
             'operation_step': 'pre_ingest',
-            'output_path': 'input-text',
+            'output_path': output_prefix or config.get('PRE_INGEST_OUTPUT_PREFIX', 'input-text'),
         }
     ])
     task_update_record.delay(message)
@@ -370,6 +382,11 @@ def build_parser():
                         action='store',
                         help='Inline text segment to classify through the pre-ingest pipeline')
 
+    parser.add_argument('--output-prefix',
+                        dest='output_prefix',
+                        action='store',
+                        help='Override the output TSV filename prefix for pre-ingest runs')
+
     parser.add_argument('-t',
                         '--test',
                         dest='test',
@@ -409,6 +426,8 @@ def _validate_args(parser, args):
             parser.error('`--pre-ingest` requires exactly one of `--records` or `--input-text`.')
     elif args.input_text:
         parser.error('`--input-text` is only supported with `--pre-ingest`.')
+    if args.output_prefix and not args.pre_ingest:
+        parser.error('`--output-prefix` is only supported with `--pre-ingest`.')
 
 
 def main(argv=None):
@@ -433,9 +452,9 @@ def main(argv=None):
     if args.pre_ingest:
         print("Processing pre-ingest records")
         if args.records:
-            batch_pre_ingest_records(records_path)
+            batch_pre_ingest_records(records_path, output_prefix=args.output_prefix)
         else:
-            queue_pre_ingest_input_text(args.input_text)
+            queue_pre_ingest_input_text(args.input_text, output_prefix=args.output_prefix)
 
     if args.bibcode:
         print('Resending bibcode')

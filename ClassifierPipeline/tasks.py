@@ -35,6 +35,7 @@ import sys
 import os
 import json
 import time
+import uuid
 import adsputils
 from adsputils import ADSCelery
 import ClassifierPipeline.app as app_module
@@ -100,7 +101,7 @@ def _resolve_positive_int_config(name, default):
 
 def _generate_run_id(operation_step=None):
     prefix = "pre-ingest" if operation_step == "pre_ingest" else "run"
-    return f"{prefix}-{int(time.time() * 1000)}"
+    return f"{prefix}-{int(time.time() * 1000)}-{uuid.uuid4().hex}"
 
 # ============================= TASKS ============================================= #
 

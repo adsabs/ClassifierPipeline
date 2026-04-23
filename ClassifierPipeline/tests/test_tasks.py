@@ -1,4 +1,5 @@
 import importlib
+import re
 import sys
 import types
 
@@ -78,6 +79,14 @@ def test_record_identifier_prefers_scix_id(monkeypatch, base_fake_config, dummy_
 def test_record_identifier_uses_bibcode_fallback(monkeypatch, base_fake_config, dummy_logger):
     module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
     assert module._record_identifier({"bibcode": "B"}) == "B"
+
+
+def test_generate_run_id_for_pre_ingest_is_unique_and_prefixed(monkeypatch, base_fake_config, dummy_logger):
+    module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
+    run_id_one = module._generate_run_id("pre_ingest")
+    run_id_two = module._generate_run_id("pre_ingest")
+    assert run_id_one != run_id_two
+    assert re.match(r"^pre-ingest-\d+-[0-9a-f]{32}$", run_id_one)
 
 
 def test_task_update_record_creates_run_id_and_output_file(monkeypatch, base_fake_config, dummy_logger):
@@ -165,6 +174,26 @@ def test_task_update_record_pre_ingest_skips_index_run(monkeypatch, base_fake_co
     assert result["records_submitted"] == 1
     assert result["run_id"].startswith("pre-ingest-")
     assert forwarded[0][0]["operation_step"] == "pre_ingest"
+
+
+def test_task_update_record_pre_ingest_preserves_custom_output_prefix(monkeypatch, base_fake_config, dummy_logger):
+    module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
+    prepared = []
+    forwarded = []
+    module.utils.prepare_output_file = lambda path: prepared.append(path)
+    module.utils.classifyRequestRecordList_to_list = lambda message: [dict(message)]
+    module.utils.list_to_ClassifyRequestRecordList = lambda payload: payload
+    module.perf_metrics.emit_event = lambda **kwargs: None
+    module.app.index_run = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("pre_ingest should not index run"))
+    module.task_send_input_record_to_classifier = lambda message: forwarded.append(message)
+
+    result = module.task_update_record(
+        {"title": "T", "abstract": "A", "operation_step": "pre_ingest", "output_path": "custom-prefix"}
+    )
+
+    assert result["run_id"].startswith("pre-ingest-")
+    assert prepared and "/logs/custom-prefix_" in prepared[0]
+    assert forwarded and forwarded[0][0]["output_path"] == prepared[0]
 
 
 def test_task_update_record_uses_delay_when_enabled(monkeypatch, base_fake_config, dummy_logger):
