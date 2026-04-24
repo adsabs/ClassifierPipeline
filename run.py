@@ -192,6 +192,7 @@ def get_pre_ingest_delimiter(records_path, delimiter=None):
 
     sniffed = sniff_pre_ingest_delimiter(records_path)
     if sniffed in {',', '\t'}:
+        logger.debug(f"Sniffed delimiter {sniffed!r} from {records_path}")
         return sniffed
 
     extension = os.path.splitext(records_path)[1].lower()
@@ -267,12 +268,17 @@ def batch_pre_ingest_records(records_path, batch_size=500, output_prefix=None, d
         optionally include a header row.
     batch_size : int, default 500
         Number of rows per message batch.
+    output_prefix : str, optional
+        Override for the generated output filename prefix.
+    delimiter : str, optional
+        Explicit delimiter override. Supported values are comma/csv/, and
+        tab/tsv/\\t.
     """
     batch = []
     output_name = output_prefix or os.path.basename(records_path)
     delimiter = get_pre_ingest_delimiter(records_path, delimiter=delimiter)
 
-    with open(records_path, 'r') as file:
+    with open(records_path, 'r', newline='') as file:
         reader = csv.reader(file, delimiter=delimiter)
 
         first_row = next(reader)
@@ -491,6 +497,11 @@ def _validate_args(parser, args):
         parser.error('`--delimiter` is only supported with `--pre-ingest`.')
     if args.delimiter and args.input_text:
         parser.error('`--delimiter` is only supported with `--records` in `--pre-ingest` mode.')
+    if args.delimiter:
+        try:
+            normalize_pre_ingest_delimiter(args.delimiter)
+        except ValueError as exc:
+            parser.error(str(exc))
 
 
 def main(argv=None):

@@ -14,7 +14,6 @@ def _import_run_module(monkeypatch, dummy_logger):
     fake_tasks.task_resend_to_master = lambda message: None
 
     fake_utils = types.ModuleType("ClassifierPipeline.utilities")
-    fake_utils.check_identifier = lambda value: "scix_id" if str(value).startswith("scix:") else ("bibcode" if len(str(value)) == 19 else None)
     fake_utils.list_to_ClassifyRequestRecordList = lambda payload: payload
     fake_utils.classifyRequestRecordList_to_list = lambda message: message
 
@@ -55,6 +54,13 @@ def test_get_pre_ingest_delimiter_prefers_explicit_override(monkeypatch, dummy_l
     assert module.get_pre_ingest_delimiter("records.tsv", delimiter="csv") == ","
     assert module.get_pre_ingest_delimiter("records.csv", delimiter="tsv") == "\t"
     assert module.get_pre_ingest_delimiter("records.txt", delimiter=r"\t") == "\t"
+
+
+def test_normalize_pre_ingest_delimiter_rejects_unsupported_value(monkeypatch, dummy_logger):
+    module = _import_run_module(monkeypatch, dummy_logger)
+
+    with pytest.raises(ValueError, match="Unsupported delimiter"):
+        module.normalize_pre_ingest_delimiter("pipe")
 
 
 def test_get_pre_ingest_delimiter_uses_sniffed_value_when_no_override(monkeypatch, dummy_logger):
@@ -239,6 +245,15 @@ def test_main_rejects_delimiter_without_pre_ingest(monkeypatch, dummy_logger):
 
     with pytest.raises(SystemExit):
         module.main(["--delimiter", "csv"])
+
+
+def test_main_rejects_unsupported_delimiter_value(monkeypatch, dummy_logger, tmp_path):
+    module = _import_run_module(monkeypatch, dummy_logger)
+    records = tmp_path / "pre.txt"
+    records.write_text("title,abstract\n")
+
+    with pytest.raises(SystemExit):
+        module.main(["--pre-ingest", "--records", str(records), "--delimiter", "pipe"])
 
 
 def test_main_rejects_pre_ingest_without_exactly_one_input_source(monkeypatch, dummy_logger, tmp_path):
