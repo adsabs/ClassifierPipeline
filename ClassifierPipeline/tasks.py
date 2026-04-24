@@ -173,8 +173,12 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
 
         output_path = _build_output_path(proj_home, operation_step, filename, run_id)
 
-        utils.prepare_output_file(output_path)
-        logger.info('Prepared output file: {}'.format(output_path))
+        should_prepare_output = not (operation_step == "pre_ingest" and request_list[0].get("run_id"))
+        if should_prepare_output:
+            utils.prepare_output_file(output_path)
+            logger.info('Prepared output file: {}'.format(output_path))
+        else:
+            logger.info('Using existing prepared output file: {}'.format(output_path))
 
         delay_message = config.get('DELAY_MESSAGE', False)
         logger.debug("Delay set for queue messages: {}".format(delay_message))

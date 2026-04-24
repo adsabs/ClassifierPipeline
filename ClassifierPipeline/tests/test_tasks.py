@@ -223,6 +223,26 @@ def test_task_update_record_pre_ingest_preserves_custom_output_prefix(monkeypatc
     assert forwarded and forwarded[0][0]["output_path"] == prepared[0]
 
 
+def test_task_update_record_pre_ingest_reuses_existing_run_id_without_repreparing_output(monkeypatch, base_fake_config, dummy_logger):
+    module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
+    prepared = []
+    forwarded = []
+    module.utils.prepare_output_file = lambda path: prepared.append(path)
+    module.utils.classifyRequestRecordList_to_list = lambda message: [dict(message)]
+    module.utils.list_to_ClassifyRequestRecordList = lambda payload: payload
+    module.perf_metrics.emit_event = lambda **kwargs: None
+    module.app.index_run = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("existing pre_ingest run should not index run"))
+    module.task_send_input_record_to_classifier = lambda message: forwarded.append(message)
+
+    result = module.task_update_record(
+        {"title": "T", "abstract": "A", "operation_step": "pre_ingest", "run_id": "PRE-RUN-ID", "output_path": "custom-prefix"}
+    )
+
+    assert result["run_id"] == "PRE-RUN-ID"
+    assert prepared == []
+    assert forwarded and forwarded[0][0]["output_path"].endswith("/logs/custom-prefix_classified.tsv")
+
+
 def test_task_update_record_uses_delay_when_enabled(monkeypatch, base_fake_config, dummy_logger):
     module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
     module.config["DELAY_MESSAGE"] = True

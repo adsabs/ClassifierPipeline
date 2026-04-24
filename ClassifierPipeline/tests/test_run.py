@@ -12,10 +12,13 @@ def _import_run_module(monkeypatch, dummy_logger):
     fake_tasks.task_update_validated_records = lambda message: None
     fake_tasks.task_index_classified_record = lambda message: None
     fake_tasks.task_resend_to_master = lambda message: None
+    fake_tasks._build_output_path = lambda proj_home, operation_step, filename, run_id: f"{proj_home}/logs/{filename or 'pre-ingest'}_classified.tsv"
+    fake_tasks._generate_run_id = lambda operation_step=None: "PRE-RUN-ID"
 
     fake_utils = types.ModuleType("ClassifierPipeline.utilities")
     fake_utils.list_to_ClassifyRequestRecordList = lambda payload: payload
     fake_utils.classifyRequestRecordList_to_list = lambda message: message
+    fake_utils.prepare_output_file = lambda path: None
 
     monkeypatch.setattr("adsputils.load_config", lambda proj_home=None: {"LOGGING_LEVEL": "INFO", "LOG_STDOUT": False, "DELAY_MESSAGE": False, "TEST_INPUT_DATA": "", "PRE_INGEST_OUTPUT_PREFIX": "input-text"})
     monkeypatch.setattr("adsputils.setup_logging", lambda *args, **kwargs: dummy_logger)
@@ -35,7 +38,7 @@ def test_batch_pre_ingest_records_skips_header(monkeypatch, dummy_logger, tmp_pa
 
     module.batch_pre_ingest_records(str(records), batch_size=10)
 
-    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "pre.tsv"}]]
+    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "pre.tsv", "run_id": "PRE-RUN-ID"}]]
 
 
 def test_get_pre_ingest_delimiter_uses_extension_defaults(monkeypatch, dummy_logger):
@@ -80,7 +83,7 @@ def test_batch_pre_ingest_records_accepts_no_header(monkeypatch, dummy_logger, t
 
     module.batch_pre_ingest_records(str(records), batch_size=10)
 
-    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "pre.tsv"}]]
+    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "pre.tsv", "run_id": "PRE-RUN-ID"}]]
 
 
 def test_batch_pre_ingest_records_tsv_regression_guard(monkeypatch, dummy_logger, tmp_path):
@@ -107,7 +110,7 @@ def test_batch_pre_ingest_records_accepts_csv_with_header(monkeypatch, dummy_log
 
     module.batch_pre_ingest_records(str(records), batch_size=10)
 
-    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "pre.csv"}]]
+    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "pre.csv", "run_id": "PRE-RUN-ID"}]]
 
 
 def test_batch_pre_ingest_records_accepts_csv_without_header(monkeypatch, dummy_logger, tmp_path):
@@ -120,7 +123,7 @@ def test_batch_pre_ingest_records_accepts_csv_without_header(monkeypatch, dummy_
 
     module.batch_pre_ingest_records(str(records), batch_size=10)
 
-    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "pre.csv"}]]
+    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "pre.csv", "run_id": "PRE-RUN-ID"}]]
 
 
 def test_batch_pre_ingest_records_accepts_txt_with_sniffed_comma(monkeypatch, dummy_logger, tmp_path):
@@ -133,7 +136,7 @@ def test_batch_pre_ingest_records_accepts_txt_with_sniffed_comma(monkeypatch, du
 
     module.batch_pre_ingest_records(str(records), batch_size=10)
 
-    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "pre.txt"}]]
+    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "pre.txt", "run_id": "PRE-RUN-ID"}]]
 
 
 def test_batch_pre_ingest_records_accepts_explicit_delimiter_override(monkeypatch, dummy_logger, tmp_path):
@@ -146,7 +149,23 @@ def test_batch_pre_ingest_records_accepts_explicit_delimiter_override(monkeypatc
 
     module.batch_pre_ingest_records(str(records), batch_size=10, delimiter="csv")
 
-    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "misnamed.tsv"}]]
+    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "misnamed.tsv", "run_id": "PRE-RUN-ID"}]]
+
+
+def test_batch_pre_ingest_records_prepares_output_once_and_reuses_run_id(monkeypatch, dummy_logger, tmp_path):
+    module = _import_run_module(monkeypatch, dummy_logger)
+    module.utils.list_to_ClassifyRequestRecordList = lambda payload: payload
+    records = tmp_path / "pre.tsv"
+    records.write_text("title\tabstract\nTitle 1\tAbstract 1\nTitle 2\tAbstract 2\n")
+    prepared = []
+    captured = []
+    module.utils.prepare_output_file = lambda path: prepared.append(path)
+    module.task_update_record.delay = lambda message: captured.append(message)
+
+    module.batch_pre_ingest_records(str(records), batch_size=1)
+
+    assert prepared == [f"{module.proj_home}/logs/pre.tsv_classified.tsv"]
+    assert [batch[0]["run_id"] for batch in captured] == ["PRE-RUN-ID", "PRE-RUN-ID"]
 
 
 def test_batch_pre_ingest_records_honors_exact_batch_size_without_header(monkeypatch, dummy_logger, tmp_path):
@@ -174,7 +193,7 @@ def test_batch_pre_ingest_records_treats_title_word_as_data_when_second_column_n
 
     module.batch_pre_ingest_records(str(records), batch_size=10)
 
-    assert captured == [[{"title": "title", "abstract": "Actually an abstract", "operation_step": "pre_ingest", "output_path": "pre.tsv"}]]
+    assert captured == [[{"title": "title", "abstract": "Actually an abstract", "operation_step": "pre_ingest", "output_path": "pre.tsv", "run_id": "PRE-RUN-ID"}]]
 
 
 def test_pre_ingest_row_to_dictionary_rejects_short_rows(monkeypatch, dummy_logger):
