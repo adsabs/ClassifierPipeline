@@ -89,6 +89,18 @@ def test_generate_run_id_for_pre_ingest_is_unique_and_prefixed(monkeypatch, base
     assert re.match(r"^pre-ingest-\d+-[0-9a-f]{32}$", run_id_one)
 
 
+def test_build_output_path_uses_stable_pre_ingest_filename(monkeypatch, base_fake_config, dummy_logger):
+    module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
+    output_path = module._build_output_path("/tmp/project", "pre_ingest", "custom-prefix", "RUNID")
+    assert output_path == "/tmp/project/logs/custom-prefix_classified.tsv"
+
+
+def test_build_output_path_uses_run_id_for_non_pre_ingest(monkeypatch, base_fake_config, dummy_logger):
+    module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
+    output_path = module._build_output_path("/tmp/project", "classify_verify", "custom-prefix", "RUNID")
+    assert output_path == "/tmp/project/logs/custom-prefix_RUNID_classified.tsv"
+
+
 def test_task_update_record_creates_run_id_and_output_file(monkeypatch, base_fake_config, dummy_logger):
     module, fake_app = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
     calls = {"prepared": [], "forwarded": [], "events": []}
