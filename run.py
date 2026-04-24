@@ -156,21 +156,27 @@ def is_pre_ingest_header(row):
     return first == 'title' and second in {'abstract', 'text', 'body'}
 
 
+PRE_INGEST_DELIMITER_ALIASES = {
+    ',': ',',
+    'comma': ',',
+    'csv': ',',
+    r'\t': '\t',
+    'tab': '\t',
+    'tsv': '\t',
+}
+
+
+def unsupported_pre_ingest_delimiter_message(delimiter):
+    return f"Unsupported delimiter {delimiter!r}. Use one of: comma, csv, tab, tsv, ',', '\\t'."
+
+
 def normalize_pre_ingest_delimiter(delimiter):
     if delimiter is None:
         return None
     normalized = str(delimiter).strip().lower()
-    mapping = {
-        ',': ',',
-        'comma': ',',
-        'csv': ',',
-        r'\t': '\t',
-        'tab': '\t',
-        'tsv': '\t',
-    }
-    if normalized not in mapping:
-        raise ValueError(f"Unsupported delimiter {delimiter!r}. Use one of: comma, csv, tab, tsv, ',', '\\t'.")
-    return mapping[normalized]
+    if normalized not in PRE_INGEST_DELIMITER_ALIASES:
+        raise ValueError(unsupported_pre_ingest_delimiter_message(delimiter))
+    return PRE_INGEST_DELIMITER_ALIASES[normalized]
 
 
 def sniff_pre_ingest_delimiter(records_path):
@@ -271,7 +277,7 @@ def batch_pre_ingest_records(records_path, batch_size=500, output_prefix=None, d
     output_prefix : str, optional
         Override for the generated output filename prefix.
     delimiter : str, optional
-        Explicit delimiter override. Supported values are comma/csv/, and
+        Explicit delimiter override. Supported values are comma/csv, and
         tab/tsv/\\t.
     """
     batch = []
@@ -498,10 +504,9 @@ def _validate_args(parser, args):
     if args.delimiter and args.input_text:
         parser.error('`--delimiter` is only supported with `--records` in `--pre-ingest` mode.')
     if args.delimiter:
-        try:
-            normalize_pre_ingest_delimiter(args.delimiter)
-        except ValueError as exc:
-            parser.error(str(exc))
+        normalized_delimiter = str(args.delimiter).strip().lower()
+        if normalized_delimiter not in PRE_INGEST_DELIMITER_ALIASES:
+            parser.error(unsupported_pre_ingest_delimiter_message(args.delimiter))
 
 
 def main(argv=None):

@@ -240,14 +240,17 @@ def test_main_rejects_output_prefix_without_pre_ingest(monkeypatch, dummy_logger
         module.main(["--output-prefix", "custom-prefix"])
 
 
-def test_main_rejects_delimiter_without_pre_ingest(monkeypatch, dummy_logger):
+def test_main_rejects_delimiter_without_pre_ingest(monkeypatch, dummy_logger, capsys):
     module = _import_run_module(monkeypatch, dummy_logger)
 
     with pytest.raises(SystemExit):
         module.main(["--delimiter", "csv"])
 
+    captured = capsys.readouterr()
+    assert "`--delimiter` is only supported with `--pre-ingest`." in captured.err
 
-def test_main_rejects_unsupported_delimiter_value(monkeypatch, dummy_logger, tmp_path):
+
+def test_main_rejects_unsupported_delimiter_value(monkeypatch, dummy_logger, tmp_path, capsys):
     module = _import_run_module(monkeypatch, dummy_logger)
     records = tmp_path / "pre.txt"
     records.write_text("title,abstract\n")
@@ -255,8 +258,12 @@ def test_main_rejects_unsupported_delimiter_value(monkeypatch, dummy_logger, tmp
     with pytest.raises(SystemExit):
         module.main(["--pre-ingest", "--records", str(records), "--delimiter", "pipe"])
 
+    captured = capsys.readouterr()
+    assert "Unsupported delimiter 'pipe'." in captured.err
+    assert "Use one of: comma, csv, tab, tsv, ',', '\\t'." in captured.err
 
-def test_main_rejects_pre_ingest_without_exactly_one_input_source(monkeypatch, dummy_logger, tmp_path):
+
+def test_main_rejects_pre_ingest_without_exactly_one_input_source(monkeypatch, dummy_logger, tmp_path, capsys):
     module = _import_run_module(monkeypatch, dummy_logger)
     records = tmp_path / "pre.tsv"
     records.write_text("title\tabstract\n")
@@ -264,8 +271,14 @@ def test_main_rejects_pre_ingest_without_exactly_one_input_source(monkeypatch, d
     with pytest.raises(SystemExit):
         module.main(["--pre-ingest"])
 
+    captured = capsys.readouterr()
+    assert "`--pre-ingest` requires exactly one of `--records` or `--input-text`." in captured.err
+
     with pytest.raises(SystemExit):
         module.main(["--pre-ingest", "--records", str(records), "--input-text", "sample body"])
+
+    captured = capsys.readouterr()
+    assert "`--pre-ingest` requires exactly one of `--records` or `--input-text`." in captured.err
 
 
 def test_main_rejects_delimiter_with_input_text(monkeypatch, dummy_logger):
