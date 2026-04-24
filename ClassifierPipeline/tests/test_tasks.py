@@ -95,6 +95,12 @@ def test_build_output_path_uses_stable_pre_ingest_filename(monkeypatch, base_fak
     assert output_path == "/tmp/project/logs/custom-prefix_classified.tsv"
 
 
+def test_build_output_path_defaults_pre_ingest_filename_when_missing(monkeypatch, base_fake_config, dummy_logger):
+    module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
+    output_path = module._build_output_path("/tmp/project", "pre_ingest", None, "RUNID")
+    assert output_path == "/tmp/project/logs/pre-ingest_classified.tsv"
+
+
 def test_build_output_path_uses_run_id_for_non_pre_ingest(monkeypatch, base_fake_config, dummy_logger):
     module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
     output_path = module._build_output_path("/tmp/project", "classify_verify", "custom-prefix", "RUNID")

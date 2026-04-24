@@ -105,10 +105,14 @@ def _generate_run_id(operation_step=None):
 
 
 def _build_output_path(proj_home, operation_step, filename, run_id):
+    """
+    Build the batch output path for a run.
+
+    Pre-ingest uses a stable filename on purpose so one-shot ad hoc runs
+    overwrite prior output instead of accumulating per-run files.
+    """
     safe_filename = filename or "pre-ingest"
     if operation_step == "pre_ingest":
-        # Pre-ingest outputs intentionally reuse the same filename so one-shot
-        # runs overwrite prior ad hoc results instead of accumulating files.
         return os.path.join(proj_home, 'logs', f'{safe_filename}_classified.tsv')
     return os.path.join(proj_home, 'logs', f'{safe_filename}_{run_id}_classified.tsv')
 
