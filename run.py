@@ -156,6 +156,13 @@ def is_pre_ingest_header(row):
     return first == 'title' and second in {'abstract', 'text', 'body'}
 
 
+def get_pre_ingest_delimiter(records_path):
+    extension = os.path.splitext(str(records_path))[1].lower()
+    if extension == '.csv':
+        return ','
+    return '\t'
+
+
 def batch_new_records(records_path, batch_size=500):
     """
     Read a CSV of new records and enqueue messages in batches.
@@ -211,21 +218,23 @@ def batch_new_records(records_path, batch_size=500):
 
 def batch_pre_ingest_records(records_path, batch_size=500, output_prefix=None):
     """
-    Read a TSV of pre-ingest records and enqueue messages in batches.
+    Read a TSV or CSV of pre-ingest records and enqueue messages in batches.
 
     Parameters
     ----------
     records_path : str
-        Path to a tab-delimited file containing title and abstract columns.
-        The file may optionally include a header row.
+        Path to a delimited file containing title and abstract columns.
+        `.tsv` files are parsed as tab-delimited and `.csv` files are parsed
+        as comma-delimited. The file may optionally include a header row.
     batch_size : int, default 500
         Number of rows per message batch.
     """
     batch = []
     output_name = output_prefix or os.path.basename(records_path)
+    delimiter = get_pre_ingest_delimiter(records_path)
 
     with open(records_path, 'r') as file:
-        reader = csv.reader(file, delimiter='\t')
+        reader = csv.reader(file, delimiter=delimiter)
 
         first_row = next(reader)
         rows = reader
