@@ -99,12 +99,12 @@ def _resolve_positive_int_config(name, default):
     return default
 
 
-def _generate_run_id(operation_step=None):
+def generate_run_id(operation_step=None):
     prefix = "pre-ingest" if operation_step == "pre_ingest" else "run"
     return f"{prefix}-{int(time.time() * 1000)}-{uuid.uuid4().hex}"
 
 
-def _build_output_path(proj_home, operation_step, filename, run_id):
+def build_output_path(proj_home, operation_step, filename, run_id):
     """
     Build the batch output path for a run.
 
@@ -115,6 +115,17 @@ def _build_output_path(proj_home, operation_step, filename, run_id):
     if operation_step == "pre_ingest":
         return os.path.join(proj_home, 'logs', f'{safe_filename}_classified.tsv')
     return os.path.join(proj_home, 'logs', f'{safe_filename}_{run_id}_classified.tsv')
+
+
+def prepare_pre_ingest_run(filename):
+    run_id = generate_run_id(operation_step="pre_ingest")
+    output_path = build_output_path(proj_home, "pre_ingest", filename, run_id)
+    utils.prepare_output_file(output_path)
+    return run_id, output_path
+
+
+_generate_run_id = generate_run_id
+_build_output_path = build_output_path
 
 
 # ============================= TASKS ============================================= #
@@ -137,17 +148,21 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
     logger.debug(f'Message: {message}')
 
     request_list = utils.classifyRequestRecordList_to_list(message)
+    if not request_list:
+        logger.info("No records received by task_update_record")
+        return {"run_id": None, "records_submitted": 0}
     context_id = _batch_context_id(request_list)
+    first_request = request_list[0]
 
-    if 'operation_step' in request_list[0]:
-        operation_step = request_list[0]['operation_step']
+    if 'operation_step' in first_request:
+        operation_step = first_request['operation_step']
     else:
         operation_step = config.get('OPERATION_STEP', 'classify_verify')
 
-    if request_list and request_list[0].get("run_id"):
-        run_id = request_list[0].get("run_id")
+    if first_request.get("run_id"):
+        run_id = first_request.get("run_id")
     elif operation_step == "pre_ingest":
-        run_id = _generate_run_id(operation_step=operation_step)
+        run_id = generate_run_id(operation_step=operation_step)
     else:
         run_id = app.index_run(perf_metrics_context_id=context_id)
 
@@ -162,18 +177,21 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
     ):
         logger.info('Run ID: {}'.format(run_id))
 
-        if request_list[0].get('output_path'):
-            try:
-                filename = request_list[0]['output_path']
-                filename = filename.split('/')[-1]
-            except:
-                filename = request_list[0]['output_path']
+        should_prepare_output = True
+        if first_request.get("output_prepared") and first_request.get("output_path"):
+            output_path = first_request["output_path"]
+            should_prepare_output = False
         else:
-            filename = ''
+            if first_request.get('output_path'):
+                try:
+                    filename = first_request['output_path']
+                    filename = filename.split('/')[-1]
+                except:
+                    filename = first_request['output_path']
+            else:
+                filename = ''
+            output_path = build_output_path(proj_home, operation_step, filename, run_id)
 
-        output_path = _build_output_path(proj_home, operation_step, filename, run_id)
-
-        should_prepare_output = not (operation_step == "pre_ingest" and request_list[0].get("run_id"))
         if should_prepare_output:
             utils.prepare_output_file(output_path)
             logger.info('Prepared output file: {}'.format(output_path))

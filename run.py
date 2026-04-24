@@ -67,18 +67,14 @@ import argparse
 import copy
 import itertools
 from ClassifierPipeline.tasks import (
-    _build_output_path,
-    _generate_run_id,
+    prepare_pre_ingest_run,
     task_update_record,
     task_update_validated_records,
     task_index_classified_record,
     task_resend_to_master,
 )
-# import ClassifierPipeline.tasks as tasks
-# from ClassifierPipeline.utilities import check_is_allowed_category
 import ClassifierPipeline.utilities as utils
 
-# import classifyrecord_pb2
 from google.protobuf.json_format import Parse, MessageToDict
 from adsmsg import ClassifyRequestRecordList
 
@@ -288,9 +284,7 @@ def batch_pre_ingest_records(records_path, batch_size=500, output_prefix=None, d
     batch = []
     output_name = output_prefix or os.path.basename(records_path)
     delimiter = get_pre_ingest_delimiter(records_path, delimiter=delimiter)
-    run_id = _generate_run_id(operation_step='pre_ingest')
-    prepared_output_path = _build_output_path(proj_home, 'pre_ingest', output_name, run_id)
-    utils.prepare_output_file(prepared_output_path)
+    run_id, prepared_output_path = prepare_pre_ingest_run(output_name)
 
     with open(records_path, 'r', newline='') as file:
         reader = csv.reader(file, delimiter=delimiter)
@@ -305,8 +299,9 @@ def batch_pre_ingest_records(records_path, batch_size=500, output_prefix=None, d
 
         for i, row in enumerate(rows, 1):
             try:
-                record = pre_ingest_row_to_dictionary(row, output_path=output_name)
+                record = pre_ingest_row_to_dictionary(row, output_path=prepared_output_path)
                 record['run_id'] = run_id
+                record['output_prepared'] = True
                 batch.append(record)
             except ValueError as exc:
                 raise ValueError(

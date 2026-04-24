@@ -367,7 +367,8 @@ def filter_allowed_fields(input_dict, allowed_fields=None,response=False):
     if allowed_fields is None:
         if response is False:
             allowed_fields = {'bibcode', 'scix_id', 'status', 'title', 'abstract', 
-                            'operation_step', 'run_id', 'override', 'output_path', 
+                            'operation_step', 'run_id', 'override', 'output_path',
+                            'output_prepared',
                             'scores', 'collections', 'collection_scores'}
         else:
             allowed_fields = {'bibcode', 'scix_id', 'status', 'collections'}

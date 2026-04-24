@@ -264,8 +264,8 @@ def test_return_fake_data_sets_expected_keys(monkeypatch, base_fake_config, dumm
 
 def test_filter_allowed_fields_request_mode(monkeypatch, base_fake_config, dummy_logger):
     module = _import_utilities(monkeypatch, base_fake_config, dummy_logger)
-    filtered = module.filter_allowed_fields({"bibcode": "B", "title": "T", "extra": "x"})
-    assert filtered == {"bibcode": "B", "title": "T"}
+    filtered = module.filter_allowed_fields({"bibcode": "B", "title": "T", "output_prepared": True, "extra": "x"})
+    assert filtered == {"bibcode": "B", "title": "T", "output_prepared": True}
 
 
 def test_filter_allowed_fields_response_mode(monkeypatch, base_fake_config, dummy_logger):

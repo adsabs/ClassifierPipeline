@@ -83,34 +83,47 @@ def test_record_identifier_uses_bibcode_fallback(monkeypatch, base_fake_config, 
 
 def test_generate_run_id_for_pre_ingest_is_unique_and_prefixed(monkeypatch, base_fake_config, dummy_logger):
     module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
-    run_id_one = module._generate_run_id("pre_ingest")
-    run_id_two = module._generate_run_id("pre_ingest")
+    run_id_one = module.generate_run_id("pre_ingest")
+    run_id_two = module.generate_run_id("pre_ingest")
     assert run_id_one != run_id_two
     assert re.match(r"^pre-ingest-\d+-[0-9a-f]{32}$", run_id_one)
 
 
 def test_build_output_path_uses_stable_pre_ingest_filename(monkeypatch, base_fake_config, dummy_logger):
     module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
-    output_path = module._build_output_path("/tmp/project", "pre_ingest", "custom-prefix", "RUNID")
+    output_path = module.build_output_path("/tmp/project", "pre_ingest", "custom-prefix", "RUNID")
     assert output_path == "/tmp/project/logs/custom-prefix_classified.tsv"
 
 
 def test_build_output_path_defaults_pre_ingest_filename_when_missing(monkeypatch, base_fake_config, dummy_logger):
     module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
-    output_path = module._build_output_path("/tmp/project", "pre_ingest", None, "RUNID")
+    output_path = module.build_output_path("/tmp/project", "pre_ingest", None, "RUNID")
     assert output_path == "/tmp/project/logs/pre-ingest_classified.tsv"
 
 
 def test_build_output_path_defaults_pre_ingest_filename_when_empty(monkeypatch, base_fake_config, dummy_logger):
     module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
-    output_path = module._build_output_path("/tmp/project", "pre_ingest", "", "RUNID")
+    output_path = module.build_output_path("/tmp/project", "pre_ingest", "", "RUNID")
     assert output_path == "/tmp/project/logs/pre-ingest_classified.tsv"
 
 
 def test_build_output_path_uses_run_id_for_non_pre_ingest(monkeypatch, base_fake_config, dummy_logger):
     module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
-    output_path = module._build_output_path("/tmp/project", "classify_verify", "custom-prefix", "RUNID")
+    output_path = module.build_output_path("/tmp/project", "classify_verify", "custom-prefix", "RUNID")
     assert output_path == "/tmp/project/logs/custom-prefix_RUNID_classified.tsv"
+
+
+def test_prepare_pre_ingest_run_returns_run_id_and_prepares_output(monkeypatch, base_fake_config, dummy_logger):
+    module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
+    monkeypatch.setattr(module, "generate_run_id", lambda operation_step=None: "PRE-RUN-ID")
+    prepared = []
+    module.utils.prepare_output_file = lambda path: prepared.append(path)
+
+    run_id, output_path = module.prepare_pre_ingest_run("custom-prefix")
+
+    assert run_id == "PRE-RUN-ID"
+    assert output_path == f"{module.proj_home}/logs/custom-prefix_classified.tsv"
+    assert prepared == [output_path]
 
 
 def test_task_update_record_creates_run_id_and_output_file(monkeypatch, base_fake_config, dummy_logger):
@@ -235,12 +248,12 @@ def test_task_update_record_pre_ingest_reuses_existing_run_id_without_repreparin
     module.task_send_input_record_to_classifier = lambda message: forwarded.append(message)
 
     result = module.task_update_record(
-        {"title": "T", "abstract": "A", "operation_step": "pre_ingest", "run_id": "PRE-RUN-ID", "output_path": "custom-prefix"}
+        {"title": "T", "abstract": "A", "operation_step": "pre_ingest", "run_id": "PRE-RUN-ID", "output_path": "/tmp/project/logs/custom-prefix_classified.tsv", "output_prepared": True}
     )
 
     assert result["run_id"] == "PRE-RUN-ID"
     assert prepared == []
-    assert forwarded and forwarded[0][0]["output_path"].endswith("/logs/custom-prefix_classified.tsv")
+    assert forwarded and forwarded[0][0]["output_path"] == "/tmp/project/logs/custom-prefix_classified.tsv"
 
 
 def test_task_update_record_uses_delay_when_enabled(monkeypatch, base_fake_config, dummy_logger):
