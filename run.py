@@ -156,8 +156,45 @@ def is_pre_ingest_header(row):
     return first == 'title' and second in {'abstract', 'text', 'body'}
 
 
-def get_pre_ingest_delimiter(records_path):
-    extension = os.path.splitext(str(records_path))[1].lower()
+def normalize_pre_ingest_delimiter(delimiter):
+    if delimiter is None:
+        return None
+    normalized = str(delimiter).strip().lower()
+    mapping = {
+        ',': ',',
+        'comma': ',',
+        'csv': ',',
+        r'\t': '\t',
+        'tab': '\t',
+        'tsv': '\t',
+    }
+    if normalized not in mapping:
+        raise ValueError(f"Unsupported delimiter {delimiter!r}. Use one of: comma, csv, tab, tsv, ',', '\\t'.")
+    return mapping[normalized]
+
+
+def sniff_pre_ingest_delimiter(records_path):
+    with open(records_path, 'r', newline='') as file:
+        sample = file.read(4096)
+    if not sample:
+        return None
+    try:
+        dialect = csv.Sniffer().sniff(sample, delimiters=',\t')
+        return dialect.delimiter
+    except csv.Error:
+        return None
+
+
+def get_pre_ingest_delimiter(records_path, delimiter=None):
+    normalized = normalize_pre_ingest_delimiter(delimiter)
+    if normalized is not None:
+        return normalized
+
+    sniffed = sniff_pre_ingest_delimiter(records_path)
+    if sniffed in {',', '\t'}:
+        return sniffed
+
+    extension = os.path.splitext(records_path)[1].lower()
     if extension == '.csv':
         return ','
     return '\t'
@@ -216,22 +253,24 @@ def batch_new_records(records_path, batch_size=500):
             task_update_record.delay(message)
 
 
-def batch_pre_ingest_records(records_path, batch_size=500, output_prefix=None):
+def batch_pre_ingest_records(records_path, batch_size=500, output_prefix=None, delimiter=None):
     """
-    Read a TSV or CSV of pre-ingest records and enqueue messages in batches.
+    Read a TSV, CSV, or TXT file of pre-ingest records and enqueue messages in batches.
 
     Parameters
     ----------
     records_path : str
         Path to a delimited file containing title and abstract columns.
-        `.tsv` files are parsed as tab-delimited and `.csv` files are parsed
-        as comma-delimited. The file may optionally include a header row.
+        If `delimiter` is omitted, the parser first tries to sniff comma/tab
+        delimiters from file content, then falls back to extension-based
+        defaults: `.csv` -> comma, everything else -> tab. The file may
+        optionally include a header row.
     batch_size : int, default 500
         Number of rows per message batch.
     """
     batch = []
     output_name = output_prefix or os.path.basename(records_path)
-    delimiter = get_pre_ingest_delimiter(records_path)
+    delimiter = get_pre_ingest_delimiter(records_path, delimiter=delimiter)
 
     with open(records_path, 'r') as file:
         reader = csv.reader(file, delimiter=delimiter)
@@ -245,7 +284,13 @@ def batch_pre_ingest_records(records_path, batch_size=500, output_prefix=None):
             rows = itertools.chain([first_row], reader)
 
         for i, row in enumerate(rows, 1):
-            batch.append(pre_ingest_row_to_dictionary(row, output_path=output_name))
+            try:
+                batch.append(pre_ingest_row_to_dictionary(row, output_path=output_name))
+            except ValueError as exc:
+                raise ValueError(
+                    f"{exc} while parsing {records_path!r} with delimiter {delimiter!r}. "
+                    "Supply --delimiter if the file is not being parsed correctly."
+                ) from exc
 
             if i % batch_size == 0:
                 print(f"Processing batch {i // batch_size}")
@@ -384,12 +429,17 @@ def build_parser():
                         '--records',
                         dest='records',
                         action='store',
-                        help='Path to input records')
+                        help='Path to a .csv, .tsv, or .txt file of title/abstract pairs for pre-ingest classification')
 
     parser.add_argument('--input-text',
                         dest='input_text',
                         action='store',
                         help='Inline text segment to classify through the pre-ingest pipeline')
+
+    parser.add_argument('--delimiter',
+                        dest='delimiter',
+                        action='store',
+                        help="Override pre-ingest record parsing delimiter: comma/csv or tab/tsv. If omitted, delimiter is auto-detected from content, then falls back to file extension.")
 
     parser.add_argument('--output-prefix',
                         dest='output_prefix',
@@ -437,6 +487,10 @@ def _validate_args(parser, args):
         parser.error('`--input-text` is only supported with `--pre-ingest`.')
     if args.output_prefix and not args.pre_ingest:
         parser.error('`--output-prefix` is only supported with `--pre-ingest`.')
+    if args.delimiter and not args.pre_ingest:
+        parser.error('`--delimiter` is only supported with `--pre-ingest`.')
+    if args.delimiter and args.input_text:
+        parser.error('`--delimiter` is only supported with `--records` in `--pre-ingest` mode.')
 
 
 def main(argv=None):
@@ -461,7 +515,7 @@ def main(argv=None):
     if args.pre_ingest:
         print("Processing pre-ingest records")
         if args.records:
-            batch_pre_ingest_records(records_path, output_prefix=args.output_prefix)
+            batch_pre_ingest_records(records_path, output_prefix=args.output_prefix, delimiter=args.delimiter)
         else:
             queue_pre_ingest_input_text(args.input_text, output_prefix=args.output_prefix)
 
