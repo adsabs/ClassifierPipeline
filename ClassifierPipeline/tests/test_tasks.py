@@ -137,6 +137,7 @@ def test_task_update_record_creates_run_id_and_output_file(monkeypatch, base_fak
 
     result = module.task_update_record({"bibcode": "B", "title": "T", "abstract": "A"})
     assert result == {"run_id": "RUNID", "records_submitted": 1}
+    assert "run_id" in result
     assert calls["prepared"]
     assert calls["forwarded"][0][0]["text"] == "T A"
     assert calls["events"][0]["stage"] == "ingest_enqueue"

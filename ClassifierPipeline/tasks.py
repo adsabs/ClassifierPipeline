@@ -277,7 +277,7 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
         if run_id is not None:
             result["run_id"] = run_id
         return result
-            
+
 
 # @app.task(queue="unclassified-queue")
 # @app.task(queue="update-record")
