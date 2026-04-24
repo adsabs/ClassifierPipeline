@@ -76,6 +76,16 @@ def test_record_identifier_prefers_scix_id(monkeypatch, base_fake_config, dummy_
     assert module._record_identifier({"scix_id": "S", "bibcode": "B"}) == "S"
 
 
+def test_celery_queues_include_index_record_queue(monkeypatch, base_fake_config, dummy_logger):
+    module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
+    assert module.app.conf.CELERY_QUEUES == (
+        ("update-record", "exchange", "update-record"),
+        ("classify-record", "exchange", "classify-record"),
+        ("index-record", "exchange", "index-record"),
+        ("send-record-to-master", "exchange", "send-record-to-master"),
+    )
+
+
 def test_record_identifier_uses_bibcode_fallback(monkeypatch, base_fake_config, dummy_logger):
     module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
     assert module._record_identifier({"bibcode": "B"}) == "B"
