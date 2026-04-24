@@ -150,6 +150,24 @@ def prepare_output_file(output_path):
     logger.info(f'Prepared {output_path} for writing.')
 
 
+def ensure_output_file(output_path):
+    """
+    Ensure an output file exists and has a header without truncating content.
+    """
+    logger.info('Ensuring output file - utilities.py')
+    global _OUTPUT_FLUSH_REGISTERED
+
+    with open(output_path, 'a+', newline='') as file:
+        file.seek(0, os.SEEK_END)
+        if file.tell() == 0:
+            writer = csv.writer(file, delimiter='\t')
+            writer.writerow(OUTPUT_HEADER)
+    if not _OUTPUT_FLUSH_REGISTERED:
+        atexit.register(flush_output_file)
+        _OUTPUT_FLUSH_REGISTERED = True
+    logger.info(f'Ensured {output_path} exists for writing.')
+
+
 def flush_output_file(output_path=None):
     if output_path is not None:
         buffered_rows = _OUTPUT_ROW_BUFFERS.get(output_path, [])

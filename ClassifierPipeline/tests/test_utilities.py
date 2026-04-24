@@ -158,6 +158,21 @@ def test_prepare_output_file_resets_existing_buffer(monkeypatch, base_fake_confi
     assert len(output.read_text().strip().splitlines()) == 1
 
 
+def test_ensure_output_file_creates_header_without_truncating_existing_rows(monkeypatch, base_fake_config, dummy_logger, tmp_path):
+    module = _import_utilities(monkeypatch, base_fake_config, dummy_logger)
+    output = tmp_path / "out.tsv"
+    module.ensure_output_file(str(output))
+    initial_lines = output.read_text().strip().splitlines()
+    assert len(initial_lines) == 1
+
+    with open(output, "a", newline="") as handle:
+        handle.write("B\tS\tR\tTitle\n")
+
+    module.ensure_output_file(str(output))
+    lines = output.read_text().strip().splitlines()
+    assert len(lines) == 2
+
+
 def test_build_output_row_uses_blank_identifiers_and_derived_scores(monkeypatch, base_fake_config, dummy_logger):
     module = _import_utilities(monkeypatch, base_fake_config, dummy_logger)
     row = module.build_output_row(

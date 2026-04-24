@@ -39,6 +39,7 @@ def _import_tasks_module(monkeypatch, base_fake_config, dummy_logger):
     fake_utils.classifyRequestRecordList_to_list = lambda message: message if isinstance(message, list) else [message]
     fake_utils.list_to_ClassifyRequestRecordList = lambda payload: payload
     fake_utils.prepare_output_file = lambda path: None
+    fake_utils.ensure_output_file = lambda path: None
     fake_utils.classify_record_from_scores = lambda record: record
     fake_utils.return_fake_data = lambda record: {**record, "categories": ["fake"], "scores": [1.0]}
     fake_utils.add_record_to_output_file = lambda record: None
@@ -239,8 +240,10 @@ def test_task_update_record_pre_ingest_preserves_custom_output_prefix(monkeypatc
 def test_task_update_record_pre_ingest_reuses_existing_run_id_without_repreparing_output(monkeypatch, base_fake_config, dummy_logger):
     module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
     prepared = []
+    ensured = []
     forwarded = []
     module.utils.prepare_output_file = lambda path: prepared.append(path)
+    module.utils.ensure_output_file = lambda path: ensured.append(path)
     module.utils.classifyRequestRecordList_to_list = lambda message: [dict(message)]
     module.utils.list_to_ClassifyRequestRecordList = lambda payload: payload
     module.perf_metrics.emit_event = lambda **kwargs: None
@@ -253,20 +256,22 @@ def test_task_update_record_pre_ingest_reuses_existing_run_id_without_repreparin
 
     assert result["run_id"] == "PRE-RUN-ID"
     assert prepared == []
+    assert ensured == []
     assert forwarded and forwarded[0][0]["output_path"] == "/tmp/project/logs/custom-prefix_classified.tsv"
 
 
 def test_task_update_record_pre_ingest_replay_without_flag_skips_prepare_when_output_exists(monkeypatch, base_fake_config, dummy_logger):
     module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
     prepared = []
+    ensured = []
     forwarded = []
     module.utils.prepare_output_file = lambda path: prepared.append(path)
+    module.utils.ensure_output_file = lambda path: ensured.append(path)
     module.utils.classifyRequestRecordList_to_list = lambda message: [dict(message)]
     module.utils.list_to_ClassifyRequestRecordList = lambda payload: payload
     module.perf_metrics.emit_event = lambda **kwargs: None
     module.app.index_run = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("existing pre_ingest run should not index run"))
     module.task_send_input_record_to_classifier = lambda message: forwarded.append(message)
-    monkeypatch.setattr(module.os.path, "exists", lambda path: path == "/tmp/project/logs/custom-prefix_classified.tsv")
 
     result = module.task_update_record(
         {"title": "T", "abstract": "A", "operation_step": "pre_ingest", "run_id": "PRE-RUN-ID", "output_path": "/tmp/project/logs/custom-prefix_classified.tsv"}
@@ -274,27 +279,30 @@ def test_task_update_record_pre_ingest_replay_without_flag_skips_prepare_when_ou
 
     assert result["run_id"] == "PRE-RUN-ID"
     assert prepared == []
+    assert ensured == ["/tmp/project/logs/custom-prefix_classified.tsv"]
     assert forwarded and forwarded[0][0]["output_path"] == "/tmp/project/logs/custom-prefix_classified.tsv"
 
 
 def test_task_update_record_pre_ingest_replay_without_flag_prepares_when_output_missing(monkeypatch, base_fake_config, dummy_logger):
     module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
     prepared = []
+    ensured = []
     forwarded = []
     module.utils.prepare_output_file = lambda path: prepared.append(path)
+    module.utils.ensure_output_file = lambda path: ensured.append(path)
     module.utils.classifyRequestRecordList_to_list = lambda message: [dict(message)]
     module.utils.list_to_ClassifyRequestRecordList = lambda payload: payload
     module.perf_metrics.emit_event = lambda **kwargs: None
     module.app.index_run = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("existing pre_ingest run should not index run"))
     module.task_send_input_record_to_classifier = lambda message: forwarded.append(message)
-    monkeypatch.setattr(module.os.path, "exists", lambda path: False)
 
     result = module.task_update_record(
         {"title": "T", "abstract": "A", "operation_step": "pre_ingest", "run_id": "PRE-RUN-ID", "output_path": "/tmp/project/logs/custom-prefix_classified.tsv"}
     )
 
     assert result["run_id"] == "PRE-RUN-ID"
-    assert prepared == ["/tmp/project/logs/custom-prefix_classified.tsv"]
+    assert prepared == []
+    assert ensured == ["/tmp/project/logs/custom-prefix_classified.tsv"]
     assert forwarded and forwarded[0][0]["output_path"] == "/tmp/project/logs/custom-prefix_classified.tsv"
 
 
