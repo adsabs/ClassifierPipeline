@@ -35,7 +35,7 @@ import sys
 import os
 import json
 import time
-import uuid
+import itertools
 import adsputils
 from adsputils import ADSCelery
 import ClassifierPipeline.app as app_module
@@ -71,6 +71,7 @@ app.conf.CELERY_QUEUES = (
 
 classifier = Classifier()
 _UNSET = object()
+_RUN_ID_COUNTER = itertools.count()
 
 
 def _record_identifier(record):
@@ -101,8 +102,7 @@ def _resolve_positive_int_config(name, default):
 
 
 def generate_run_id(operation_step=None):
-    prefix = "pre-ingest" if operation_step == "pre_ingest" else "run"
-    return f"{prefix}-{int(time.time() * 1000)}-{uuid.uuid4().hex}"
+    return time.time_ns() + next(_RUN_ID_COUNTER)
 
 
 def build_output_path(proj_home, operation_step, filename, run_id):

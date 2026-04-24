@@ -327,6 +327,12 @@ def test_list_to_request_record_list_builds_payload(monkeypatch, base_fake_confi
     assert out["payload"] == {"classify_requests": [{"bibcode": "B"}]}
 
 
+def test_filter_allowed_fields_preserves_integer_run_id(monkeypatch, base_fake_config, dummy_logger):
+    module = _import_utilities(monkeypatch, base_fake_config, dummy_logger)
+    filtered = module.filter_allowed_fields({"bibcode": "B", "run_id": 123456789, "extra": "x"})
+    assert filtered == {"bibcode": "B", "run_id": 123456789}
+
+
 def test_dict_to_response_record_uses_filtered_payload(monkeypatch, base_fake_config, dummy_logger):
     module = _import_utilities(monkeypatch, base_fake_config, dummy_logger)
     monkeypatch.setattr(module, "ClassifyResponseRecord", lambda: types.SimpleNamespace())
