@@ -165,9 +165,7 @@ PRE_INGEST_DELIMITER_ALIASES = {
     'tsv': '\t',
 }
 
-
-def unsupported_pre_ingest_delimiter_message(delimiter):
-    return f"Unsupported delimiter {delimiter!r}. Use one of: comma, csv, tab, tsv, ',', '\\t'."
+UNSUPPORTED_PRE_INGEST_DELIMITER_MESSAGE = "Unsupported delimiter {delimiter!r}. Use one of: comma, csv, tab, tsv, ',', '\\t'."
 
 
 def normalize_pre_ingest_delimiter(delimiter):
@@ -175,7 +173,7 @@ def normalize_pre_ingest_delimiter(delimiter):
         return None
     normalized = str(delimiter).strip().lower()
     if normalized not in PRE_INGEST_DELIMITER_ALIASES:
-        raise ValueError(unsupported_pre_ingest_delimiter_message(delimiter))
+        raise ValueError(UNSUPPORTED_PRE_INGEST_DELIMITER_MESSAGE.format(delimiter=delimiter))
     return PRE_INGEST_DELIMITER_ALIASES[normalized]
 
 
@@ -504,9 +502,10 @@ def _validate_args(parser, args):
     if args.delimiter and args.input_text:
         parser.error('`--delimiter` is only supported with `--records` in `--pre-ingest` mode.')
     if args.delimiter:
-        normalized_delimiter = str(args.delimiter).strip().lower()
-        if normalized_delimiter not in PRE_INGEST_DELIMITER_ALIASES:
-            parser.error(unsupported_pre_ingest_delimiter_message(args.delimiter))
+        try:
+            normalize_pre_ingest_delimiter(args.delimiter)
+        except ValueError:
+            parser.error(UNSUPPORTED_PRE_INGEST_DELIMITER_MESSAGE.format(delimiter=args.delimiter))
 
 
 def main(argv=None):
