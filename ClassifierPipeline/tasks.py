@@ -185,8 +185,9 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
             existing_output_path = first_request.get("output_path")
             if operation_step == "pre_ingest" and existing_output_path and os.path.isabs(existing_output_path):
                 logger.warning(
-                    "Pre-ingest message missing `output_prepared`; treating absolute output_path as replay target: %s",
-                    existing_output_path,
+                    "Pre-ingest message missing `output_prepared`; treating absolute output_path as replay target: {}".format(
+                        existing_output_path
+                    )
                 )
                 output_path = existing_output_path
                 should_prepare_output = False
@@ -272,7 +273,10 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
                 config=config,
             )
 
-        return {"run_id": run_id, "records_submitted": len(request_list)}
+        result = {"records_submitted": len(request_list)}
+        if run_id is not None:
+            result["run_id"] = run_id
+        return result
             
 
 # @app.task(queue="unclassified-queue")

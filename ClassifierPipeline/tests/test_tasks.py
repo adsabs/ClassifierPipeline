@@ -209,7 +209,7 @@ def test_task_update_record_pre_ingest_skips_index_run(monkeypatch, base_fake_co
 
     result = module.task_update_record({"title": "T", "abstract": "A", "operation_step": "pre_ingest"})
     assert result["records_submitted"] == 1
-    assert result["run_id"] is None
+    assert "run_id" not in result
     assert prepared and prepared[0].endswith("/logs/pre-ingest_classified.tsv")
     assert forwarded[0][0]["operation_step"] == "pre_ingest"
     assert "run_id" not in forwarded[0][0]
@@ -230,7 +230,7 @@ def test_task_update_record_pre_ingest_preserves_custom_output_prefix(monkeypatc
         {"title": "T", "abstract": "A", "operation_step": "pre_ingest", "output_path": "custom-prefix"}
     )
 
-    assert result["run_id"] is None
+    assert "run_id" not in result
     assert prepared and prepared[0].endswith("/logs/custom-prefix_classified.tsv")
     assert forwarded and forwarded[0][0]["output_path"] == prepared[0]
 
@@ -252,7 +252,7 @@ def test_task_update_record_pre_ingest_reuses_existing_output_without_repreparin
         {"title": "T", "abstract": "A", "operation_step": "pre_ingest", "output_path": "/tmp/project/logs/custom-prefix_classified.tsv", "output_prepared": True}
     )
 
-    assert result["run_id"] is None
+    assert "run_id" not in result
     assert prepared == []
     assert ensured == []
     assert forwarded and forwarded[0][0]["output_path"] == "/tmp/project/logs/custom-prefix_classified.tsv"
@@ -277,7 +277,7 @@ def test_task_update_record_pre_ingest_replay_without_flag_ensures_output(monkey
         {"title": "T", "abstract": "A", "operation_step": "pre_ingest", "output_path": "/tmp/project/logs/custom-prefix_classified.tsv"}
     )
 
-    assert result["run_id"] is None
+    assert "run_id" not in result
     assert prepared == []
     assert ensured == ["/tmp/project/logs/custom-prefix_classified.tsv"]
     assert forwarded and forwarded[0][0]["output_path"] == "/tmp/project/logs/custom-prefix_classified.tsv"
