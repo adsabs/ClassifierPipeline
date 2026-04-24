@@ -154,14 +154,15 @@ def ensure_output_file(output_path):
     """
     Ensure an output file exists and has a header without truncating content.
     """
-    logger.info('Ensuring output file - utilities.py')
+    logger.info('Ensuring output file: {}'.format(output_path))
     global _OUTPUT_FLUSH_REGISTERED
 
-    with open(output_path, 'a+', newline='') as file:
-        file.seek(0, os.SEEK_END)
-        if file.tell() == 0:
+    try:
+        with open(output_path, 'x', newline='') as file:
             writer = csv.writer(file, delimiter='\t')
             writer.writerow(OUTPUT_HEADER)
+    except FileExistsError:
+        pass
     if not _OUTPUT_FLUSH_REGISTERED:
         atexit.register(flush_output_file)
         _OUTPUT_FLUSH_REGISTERED = True

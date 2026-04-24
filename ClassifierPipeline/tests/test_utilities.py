@@ -173,6 +173,17 @@ def test_ensure_output_file_creates_header_without_truncating_existing_rows(monk
     assert len(lines) == 2
 
 
+def test_ensure_output_file_registers_global_flush_handler(monkeypatch, base_fake_config, dummy_logger, tmp_path):
+    module = _import_utilities(monkeypatch, base_fake_config, dummy_logger)
+    registered = []
+    monkeypatch.setattr(module.atexit, "register", lambda func: registered.append(func))
+    monkeypatch.setattr(module, "_OUTPUT_FLUSH_REGISTERED", False, raising=True)
+
+    module.ensure_output_file(str(tmp_path / "out.tsv"))
+
+    assert registered == [module.flush_output_file]
+
+
 def test_build_output_row_uses_blank_identifiers_and_derived_scores(monkeypatch, base_fake_config, dummy_logger):
     module = _import_utilities(monkeypatch, base_fake_config, dummy_logger)
     row = module.build_output_row(
