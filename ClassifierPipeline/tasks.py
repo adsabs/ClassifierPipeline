@@ -103,6 +103,13 @@ def _generate_run_id(operation_step=None):
     prefix = "pre-ingest" if operation_step == "pre_ingest" else "run"
     return f"{prefix}-{int(time.time() * 1000)}-{uuid.uuid4().hex}"
 
+
+def _build_output_path(proj_home, operation_step, filename, run_id):
+    safe_filename = filename or "pre-ingest"
+    if operation_step == "pre_ingest":
+        return os.path.join(proj_home, 'logs', f'{safe_filename}_classified.tsv')
+    return os.path.join(proj_home, 'logs', f'{safe_filename}_{run_id}_classified.tsv')
+
 # ============================= TASKS ============================================= #
 
 @app.task(queue="update-record")
@@ -157,7 +164,7 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
         else:
             filename = ''
 
-        output_path = os.path.join(proj_home, 'logs', f'{filename}_{run_id}_classified.tsv')
+        output_path = _build_output_path(proj_home, operation_step, filename, run_id)
 
         utils.prepare_output_file(output_path)
         logger.info('Prepared output file: {}'.format(output_path))
