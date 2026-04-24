@@ -12,7 +12,7 @@ def _import_run_module(monkeypatch, dummy_logger):
     fake_tasks.task_update_validated_records = lambda message: None
     fake_tasks.task_index_classified_record = lambda message: None
     fake_tasks.task_resend_to_master = lambda message: None
-    fake_tasks.prepare_pre_ingest_run = lambda filename: ("PRE-RUN-ID", f"/prepared/{filename or 'pre-ingest'}_classified.tsv")
+    fake_tasks.prepare_pre_ingest_run = lambda filename, proj_home_path=None: ("PRE-RUN-ID", f"/prepared/{filename or 'pre-ingest'}_classified.tsv")
 
     fake_utils = types.ModuleType("ClassifierPipeline.utilities")
     fake_utils.list_to_ClassifyRequestRecordList = lambda payload: payload
@@ -157,12 +157,12 @@ def test_batch_pre_ingest_records_prepares_output_once_and_reuses_run_id(monkeyp
     records.write_text("title\tabstract\nTitle 1\tAbstract 1\nTitle 2\tAbstract 2\n")
     captured = []
     prepared = []
-    module.prepare_pre_ingest_run = lambda filename: (prepared.append(filename) or ("PRE-RUN-ID", f"/prepared/{filename}_classified.tsv"))
+    module.prepare_pre_ingest_run = lambda filename, proj_home_path=None: (prepared.append((filename, proj_home_path)) or ("PRE-RUN-ID", f"/prepared/{filename}_classified.tsv"))
     module.task_update_record.delay = lambda message: captured.append(message)
 
     module.batch_pre_ingest_records(str(records), batch_size=1)
 
-    assert prepared == ["pre.tsv"]
+    assert prepared == [("pre.tsv", module.proj_home)]
     assert [batch[0]["run_id"] for batch in captured] == ["PRE-RUN-ID", "PRE-RUN-ID"]
 
 

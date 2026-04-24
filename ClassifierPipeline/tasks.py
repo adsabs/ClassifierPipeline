@@ -117,15 +117,11 @@ def build_output_path(proj_home, operation_step, filename, run_id):
     return os.path.join(proj_home, 'logs', f'{safe_filename}_{run_id}_classified.tsv')
 
 
-def prepare_pre_ingest_run(filename):
+def prepare_pre_ingest_run(filename, proj_home_path=None):
     run_id = generate_run_id(operation_step="pre_ingest")
-    output_path = build_output_path(proj_home, "pre_ingest", filename, run_id)
+    output_path = build_output_path(proj_home_path or proj_home, "pre_ingest", filename, run_id)
     utils.prepare_output_file(output_path)
     return run_id, output_path
-
-
-_generate_run_id = generate_run_id
-_build_output_path = build_output_path
 
 
 # ============================= TASKS ============================================= #
@@ -182,15 +178,16 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
             output_path = first_request["output_path"]
             should_prepare_output = False
         else:
-            if first_request.get('output_path'):
-                try:
-                    filename = first_request['output_path']
-                    filename = filename.split('/')[-1]
-                except:
-                    filename = first_request['output_path']
+            existing_output_path = first_request.get("output_path")
+            if operation_step == "pre_ingest" and first_request.get("run_id") and existing_output_path:
+                output_path = existing_output_path
+                should_prepare_output = not os.path.exists(existing_output_path)
+            elif existing_output_path:
+                filename = str(existing_output_path).split('/')[-1]
+                output_path = build_output_path(proj_home, operation_step, filename, run_id)
             else:
                 filename = ''
-            output_path = build_output_path(proj_home, operation_step, filename, run_id)
+                output_path = build_output_path(proj_home, operation_step, filename, run_id)
 
         if should_prepare_output:
             utils.prepare_output_file(output_path)

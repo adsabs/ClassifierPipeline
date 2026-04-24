@@ -284,7 +284,7 @@ def batch_pre_ingest_records(records_path, batch_size=500, output_prefix=None, d
     batch = []
     output_name = output_prefix or os.path.basename(records_path)
     delimiter = get_pre_ingest_delimiter(records_path, delimiter=delimiter)
-    run_id, prepared_output_path = prepare_pre_ingest_run(output_name)
+    run_id, prepared_output_path = prepare_pre_ingest_run(output_name, proj_home_path=proj_home)
 
     with open(records_path, 'r', newline='') as file:
         reader = csv.reader(file, delimiter=delimiter)
