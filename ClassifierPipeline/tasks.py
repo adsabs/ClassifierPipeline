@@ -102,6 +102,8 @@ def _resolve_positive_int_config(name, default):
 
 
 def generate_run_id(operation_step=None):
+    # `operation_step` is retained for caller compatibility; generation is the
+    # same for every non-pre-ingest path that still uses run IDs.
     return time.time_ns() + next(_RUN_ID_COUNTER)
 
 
@@ -182,6 +184,10 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
         else:
             existing_output_path = first_request.get("output_path")
             if operation_step == "pre_ingest" and existing_output_path and os.path.isabs(existing_output_path):
+                logger.warning(
+                    "Pre-ingest message missing `output_prepared`; treating absolute output_path as replay target: %s",
+                    existing_output_path,
+                )
                 output_path = existing_output_path
                 should_prepare_output = False
                 ensure_output_exists = True
@@ -227,12 +233,13 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
                       'abstract': record_abstract,
                       'text': record_title + ' ' + record_abstract,
                       'operation_step': operation_step,
-                      'run_id': run_id,
                       'output_format': output_format,
                       'override': None,
                       'output_path': output_path,
                       'perf_metrics_context_id': request.get("perf_metrics_context_id"),
                       }
+            if run_id is not None:
+                record['run_id'] = run_id
             normalized_records.append(record)
 
         for sub_batch in _chunk_records(normalized_records, classify_batch_size):

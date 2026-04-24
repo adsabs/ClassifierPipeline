@@ -83,8 +83,8 @@ def test_record_identifier_uses_bibcode_fallback(monkeypatch, base_fake_config, 
 
 def test_generate_run_id_is_unique_positive_integer(monkeypatch, base_fake_config, dummy_logger):
     module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
-    run_id_one = module.generate_run_id("pre_ingest")
-    run_id_two = module.generate_run_id("pre_ingest")
+    run_id_one = module.generate_run_id("classify_verify")
+    run_id_two = module.generate_run_id("classify_verify")
     assert run_id_one != run_id_two
     assert isinstance(run_id_one, int)
     assert run_id_one > 0
@@ -212,7 +212,7 @@ def test_task_update_record_pre_ingest_skips_index_run(monkeypatch, base_fake_co
     assert result["run_id"] is None
     assert prepared and prepared[0].endswith("/logs/pre-ingest_classified.tsv")
     assert forwarded[0][0]["operation_step"] == "pre_ingest"
-    assert forwarded[0][0]["run_id"] == result["run_id"]
+    assert "run_id" not in forwarded[0][0]
 
 
 def test_task_update_record_pre_ingest_preserves_custom_output_prefix(monkeypatch, base_fake_config, dummy_logger):
@@ -263,6 +263,7 @@ def test_task_update_record_pre_ingest_replay_without_flag_ensures_output(monkey
     prepared = []
     ensured = []
     forwarded = []
+    warnings = []
     module.utils.prepare_output_file = lambda path: prepared.append(path)
     module.utils.ensure_output_file = lambda path: ensured.append(path)
     module.utils.classifyRequestRecordList_to_list = lambda message: [dict(message)]
@@ -270,6 +271,7 @@ def test_task_update_record_pre_ingest_replay_without_flag_ensures_output(monkey
     module.perf_metrics.emit_event = lambda **kwargs: None
     module.app.index_run = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("existing pre_ingest run should not index run"))
     module.task_send_input_record_to_classifier = lambda message: forwarded.append(message)
+    module.logger.warning = lambda message, *args: warnings.append(message % args if args else message)
 
     result = module.task_update_record(
         {"title": "T", "abstract": "A", "operation_step": "pre_ingest", "output_path": "/tmp/project/logs/custom-prefix_classified.tsv"}
@@ -279,6 +281,8 @@ def test_task_update_record_pre_ingest_replay_without_flag_ensures_output(monkey
     assert prepared == []
     assert ensured == ["/tmp/project/logs/custom-prefix_classified.tsv"]
     assert forwarded and forwarded[0][0]["output_path"] == "/tmp/project/logs/custom-prefix_classified.tsv"
+    assert "run_id" not in forwarded[0][0]
+    assert warnings and "missing `output_prepared`" in warnings[0]
 
 
 def test_task_update_record_uses_delay_when_enabled(monkeypatch, base_fake_config, dummy_logger):
