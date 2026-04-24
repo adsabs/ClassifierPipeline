@@ -81,7 +81,7 @@ def test_record_identifier_uses_bibcode_fallback(monkeypatch, base_fake_config, 
     assert module._record_identifier({"bibcode": "B"}) == "B"
 
 
-def test_generate_run_id_for_pre_ingest_is_unique_and_prefixed(monkeypatch, base_fake_config, dummy_logger):
+def test_generate_run_id_is_unique_positive_integer(monkeypatch, base_fake_config, dummy_logger):
     module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
     run_id_one = module.generate_run_id("pre_ingest")
     run_id_two = module.generate_run_id("pre_ingest")
@@ -114,15 +114,13 @@ def test_build_output_path_uses_run_id_for_non_pre_ingest(monkeypatch, base_fake
     assert output_path == "/tmp/project/logs/custom-prefix_RUNID_classified.tsv"
 
 
-def test_prepare_pre_ingest_run_returns_run_id_and_prepares_output(monkeypatch, base_fake_config, dummy_logger):
+def test_prepare_pre_ingest_run_prepares_output(monkeypatch, base_fake_config, dummy_logger):
     module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
-    monkeypatch.setattr(module, "generate_run_id", lambda operation_step=None: 123456)
     prepared = []
     module.utils.prepare_output_file = lambda path: prepared.append(path)
 
-    run_id, output_path = module.prepare_pre_ingest_run("custom-prefix", proj_home_path="/tmp/project")
+    output_path = module.prepare_pre_ingest_run("custom-prefix", proj_home_path="/tmp/project")
 
-    assert run_id == 123456
     assert output_path == "/tmp/project/logs/custom-prefix_classified.tsv"
     assert prepared == [output_path]
 
@@ -211,7 +209,7 @@ def test_task_update_record_pre_ingest_skips_index_run(monkeypatch, base_fake_co
 
     result = module.task_update_record({"title": "T", "abstract": "A", "operation_step": "pre_ingest"})
     assert result["records_submitted"] == 1
-    assert isinstance(result["run_id"], int)
+    assert result["run_id"] is None
     assert prepared and prepared[0].endswith("/logs/pre-ingest_classified.tsv")
     assert forwarded[0][0]["operation_step"] == "pre_ingest"
     assert forwarded[0][0]["run_id"] == result["run_id"]
@@ -232,12 +230,12 @@ def test_task_update_record_pre_ingest_preserves_custom_output_prefix(monkeypatc
         {"title": "T", "abstract": "A", "operation_step": "pre_ingest", "output_path": "custom-prefix"}
     )
 
-    assert isinstance(result["run_id"], int)
+    assert result["run_id"] is None
     assert prepared and prepared[0].endswith("/logs/custom-prefix_classified.tsv")
     assert forwarded and forwarded[0][0]["output_path"] == prepared[0]
 
 
-def test_task_update_record_pre_ingest_reuses_existing_run_id_without_repreparing_output(monkeypatch, base_fake_config, dummy_logger):
+def test_task_update_record_pre_ingest_reuses_existing_output_without_repreparing(monkeypatch, base_fake_config, dummy_logger):
     module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
     prepared = []
     ensured = []
@@ -251,10 +249,10 @@ def test_task_update_record_pre_ingest_reuses_existing_run_id_without_repreparin
     module.task_send_input_record_to_classifier = lambda message: forwarded.append(message)
 
     result = module.task_update_record(
-        {"title": "T", "abstract": "A", "operation_step": "pre_ingest", "run_id": 123456, "output_path": "/tmp/project/logs/custom-prefix_classified.tsv", "output_prepared": True}
+        {"title": "T", "abstract": "A", "operation_step": "pre_ingest", "output_path": "/tmp/project/logs/custom-prefix_classified.tsv", "output_prepared": True}
     )
 
-    assert result["run_id"] == 123456
+    assert result["run_id"] is None
     assert prepared == []
     assert ensured == []
     assert forwarded and forwarded[0][0]["output_path"] == "/tmp/project/logs/custom-prefix_classified.tsv"
@@ -274,10 +272,10 @@ def test_task_update_record_pre_ingest_replay_without_flag_ensures_output(monkey
     module.task_send_input_record_to_classifier = lambda message: forwarded.append(message)
 
     result = module.task_update_record(
-        {"title": "T", "abstract": "A", "operation_step": "pre_ingest", "run_id": 123456, "output_path": "/tmp/project/logs/custom-prefix_classified.tsv"}
+        {"title": "T", "abstract": "A", "operation_step": "pre_ingest", "output_path": "/tmp/project/logs/custom-prefix_classified.tsv"}
     )
 
-    assert result["run_id"] == 123456
+    assert result["run_id"] is None
     assert prepared == []
     assert ensured == ["/tmp/project/logs/custom-prefix_classified.tsv"]
     assert forwarded and forwarded[0][0]["output_path"] == "/tmp/project/logs/custom-prefix_classified.tsv"

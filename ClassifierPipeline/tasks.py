@@ -119,11 +119,10 @@ def build_output_path(proj_home, operation_step, filename, run_id):
 
 
 def prepare_pre_ingest_run(filename, proj_home_path=_UNSET):
-    run_id = generate_run_id(operation_step="pre_ingest")
     resolved_proj_home = proj_home if proj_home_path is _UNSET else proj_home_path
-    output_path = build_output_path(resolved_proj_home, "pre_ingest", filename, run_id)
+    output_path = build_output_path(resolved_proj_home, "pre_ingest", filename, None)
     utils.prepare_output_file(output_path)
-    return run_id, output_path
+    return output_path
 
 
 # ============================= TASKS ============================================= #
@@ -157,10 +156,10 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
     else:
         operation_step = config.get('OPERATION_STEP', 'classify_verify')
 
-    if first_request.get("run_id"):
+    if first_request.get("run_id") is not None:
         run_id = first_request.get("run_id")
     elif operation_step == "pre_ingest":
-        run_id = generate_run_id(operation_step=operation_step)
+        run_id = None
     else:
         run_id = app.index_run(perf_metrics_context_id=context_id)
 
@@ -182,7 +181,7 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
             should_prepare_output = False
         else:
             existing_output_path = first_request.get("output_path")
-            if operation_step == "pre_ingest" and first_request.get("run_id") and existing_output_path:
+            if operation_step == "pre_ingest" and existing_output_path and os.path.isabs(existing_output_path):
                 output_path = existing_output_path
                 should_prepare_output = False
                 ensure_output_exists = True
