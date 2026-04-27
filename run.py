@@ -300,7 +300,6 @@ def batch_pre_ingest_records(records_path, batch_size=500, output_prefix=None, d
         for i, row in enumerate(rows, 1):
             try:
                 record = pre_ingest_row_to_dictionary(row, output_path=prepared_output_path)
-                record['output_prepared'] = True
                 batch.append(record)
             except ValueError as exc:
                 raise ValueError(

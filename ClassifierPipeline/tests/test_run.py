@@ -36,7 +36,7 @@ def test_batch_pre_ingest_records_skips_header(monkeypatch, dummy_logger, tmp_pa
 
     module.batch_pre_ingest_records(str(records), batch_size=10)
 
-    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/pre.tsv_classified.tsv", "output_prepared": True}]]
+    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/pre.tsv_classified.tsv"}]]
 
 
 def test_get_pre_ingest_delimiter_uses_extension_defaults(monkeypatch, dummy_logger):
@@ -81,7 +81,7 @@ def test_batch_pre_ingest_records_accepts_no_header(monkeypatch, dummy_logger, t
 
     module.batch_pre_ingest_records(str(records), batch_size=10)
 
-    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/pre.tsv_classified.tsv", "output_prepared": True}]]
+    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/pre.tsv_classified.tsv"}]]
 
 
 def test_batch_pre_ingest_records_tsv_regression_guard(monkeypatch, dummy_logger, tmp_path):
@@ -108,7 +108,7 @@ def test_batch_pre_ingest_records_accepts_csv_with_header(monkeypatch, dummy_log
 
     module.batch_pre_ingest_records(str(records), batch_size=10)
 
-    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/pre.csv_classified.tsv", "output_prepared": True}]]
+    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/pre.csv_classified.tsv"}]]
 
 
 def test_batch_pre_ingest_records_accepts_csv_without_header(monkeypatch, dummy_logger, tmp_path):
@@ -121,7 +121,7 @@ def test_batch_pre_ingest_records_accepts_csv_without_header(monkeypatch, dummy_
 
     module.batch_pre_ingest_records(str(records), batch_size=10)
 
-    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/pre.csv_classified.tsv", "output_prepared": True}]]
+    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/pre.csv_classified.tsv"}]]
 
 
 def test_batch_pre_ingest_records_accepts_txt_with_sniffed_comma(monkeypatch, dummy_logger, tmp_path):
@@ -134,7 +134,7 @@ def test_batch_pre_ingest_records_accepts_txt_with_sniffed_comma(monkeypatch, du
 
     module.batch_pre_ingest_records(str(records), batch_size=10)
 
-    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/pre.txt_classified.tsv", "output_prepared": True}]]
+    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/pre.txt_classified.tsv"}]]
 
 
 def test_batch_pre_ingest_records_accepts_explicit_delimiter_override(monkeypatch, dummy_logger, tmp_path):
@@ -147,7 +147,7 @@ def test_batch_pre_ingest_records_accepts_explicit_delimiter_override(monkeypatc
 
     module.batch_pre_ingest_records(str(records), batch_size=10, delimiter="csv")
 
-    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/misnamed.tsv_classified.tsv", "output_prepared": True}]]
+    assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/misnamed.tsv_classified.tsv"}]]
 
 
 def test_batch_pre_ingest_records_prepares_output_once_and_reuses_output_path(monkeypatch, dummy_logger, tmp_path):
@@ -191,7 +191,7 @@ def test_batch_pre_ingest_records_treats_title_word_as_data_when_second_column_n
 
     module.batch_pre_ingest_records(str(records), batch_size=10)
 
-    assert captured == [[{"title": "title", "abstract": "Actually an abstract", "operation_step": "pre_ingest", "output_path": "/prepared/pre.tsv_classified.tsv", "output_prepared": True}]]
+    assert captured == [[{"title": "title", "abstract": "Actually an abstract", "operation_step": "pre_ingest", "output_path": "/prepared/pre.tsv_classified.tsv"}]]
 
 
 def test_pre_ingest_row_to_dictionary_rejects_short_rows(monkeypatch, dummy_logger):

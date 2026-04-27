@@ -124,6 +124,7 @@ def prepare_pre_ingest_run(filename, proj_home_path=_UNSET):
     resolved_proj_home = proj_home if proj_home_path is _UNSET else proj_home_path
     output_path = build_output_path(resolved_proj_home, "pre_ingest", filename, None)
     utils.prepare_output_file(output_path)
+    logger.info(f'Prepared pre-ingest output file: {output_path}')
     return output_path
 
 
