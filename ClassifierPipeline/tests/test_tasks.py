@@ -249,7 +249,7 @@ def test_task_update_record_pre_ingest_preserves_custom_output_prefix(monkeypatc
     assert forwarded[0][0]["run_id"] == "RUNID"
 
 
-def test_task_update_record_pre_ingest_reuses_existing_output_without_repreparing(monkeypatch, base_fake_config, dummy_logger):
+def test_task_update_record_pre_ingest_reuses_absolute_output_path_when_run_id_present(monkeypatch, base_fake_config, dummy_logger):
     module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
     prepared = []
     ensured = []

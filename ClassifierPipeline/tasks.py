@@ -185,31 +185,27 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
 
         should_prepare_output = True
         ensure_output_exists = False
-        if first_request.get("output_prepared") and first_request.get("output_path"):
-            output_path = first_request["output_path"]
+        existing_output_path = first_request.get("output_path")
+        if (
+            operation_step == "pre_ingest"
+            and first_request.get("run_id") is not None
+            and existing_output_path
+            and os.path.isabs(existing_output_path)
+        ):
+            output_path = existing_output_path
             should_prepare_output = False
-        else:
-            existing_output_path = first_request.get("output_path")
-            if (
-                operation_step == "pre_ingest"
-                and first_request.get("run_id") is not None
-                and existing_output_path
-                and os.path.isabs(existing_output_path)
-            ):
-                output_path = existing_output_path
-                should_prepare_output = False
-            elif operation_step == "pre_ingest" and existing_output_path and os.path.isabs(existing_output_path):
-                logger.warning(
-                    "Pre-ingest message missing `run_id`; treating absolute output_path as replay target: {}".format(
-                        existing_output_path
-                    )
+        elif operation_step == "pre_ingest" and existing_output_path and os.path.isabs(existing_output_path):
+            logger.warning(
+                "Pre-ingest message missing `run_id`; treating absolute output_path as replay target: {}".format(
+                    existing_output_path
                 )
-                output_path = existing_output_path
-                should_prepare_output = False
-                ensure_output_exists = True
-            else:
-                filename = str(existing_output_path).split('/')[-1] if existing_output_path else ''
-                output_path = build_output_path(proj_home, operation_step, filename, run_id)
+            )
+            output_path = existing_output_path
+            should_prepare_output = False
+            ensure_output_exists = True
+        else:
+            filename = str(existing_output_path).split('/')[-1] if existing_output_path else ''
+            output_path = build_output_path(proj_home, operation_step, filename, run_id)
 
         if should_prepare_output:
             utils.prepare_output_file(output_path)
