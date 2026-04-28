@@ -444,10 +444,24 @@ def task_index_classified_record(message):
         logger.debug(f'Record type: {type(message)}')
         touched_output_paths = set()
         results = []
+
+        def _has_identifier(record):
+            return bool(record.get("bibcode") or record.get("scix_id"))
+
         if records and all(record.get("operation_step") in {"classify", "classify_verify"} for record in records):
             results = app.index_records_batch(records)
         elif records and all(record.get("operation_step") == "pre_ingest" for record in records):
-            results = [(record, "record_pre_ingested") for record in records]
+            indexed_specs = [(index, record) for index, record in enumerate(records) if _has_identifier(record)]
+            anonymous_specs = [(index, record) for index, record in enumerate(records) if not _has_identifier(record)]
+            indexed_results = []
+            if indexed_specs:
+                indexed_results = app.index_records_batch([record for _, record in indexed_specs])
+            ordered_results = {}
+            for (index, _), result in zip(indexed_specs, indexed_results):
+                ordered_results[index] = result
+            for index, record in anonymous_specs:
+                ordered_results[index] = (record, "record_pre_ingested")
+            results = [ordered_results[index] for index in range(len(records))]
         else:
             for record in records:
                 results.append(app.index_record(record))
@@ -474,7 +488,7 @@ def task_index_classified_record(message):
                 )
             logger.debug(f'Record: {record}, Success: {success}')
             if success == "record_indexed":
-                if record['operation_step'] == 'classify_verify':
+                if record['operation_step'] in {'classify_verify', 'pre_ingest'}:
                     logger.info(f"Record {record_id} indexed")
                     utils.add_record_to_output_file(record)
                     if record.get("output_path"):

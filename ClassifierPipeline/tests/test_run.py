@@ -17,6 +17,7 @@ def _import_run_module(monkeypatch, dummy_logger):
     fake_utils = types.ModuleType("ClassifierPipeline.utilities")
     fake_utils.list_to_ClassifyRequestRecordList = lambda payload: payload
     fake_utils.classifyRequestRecordList_to_list = lambda message: message
+    fake_utils.check_identifier = lambda value: "scix_id" if str(value).startswith("scix:") else ("bibcode" if len(str(value)) == 19 else None)
 
     monkeypatch.setattr("adsputils.load_config", lambda proj_home=None: {"LOGGING_LEVEL": "INFO", "LOG_STDOUT": False, "DELAY_MESSAGE": False, "TEST_INPUT_DATA": "", "PRE_INGEST_OUTPUT_PREFIX": "input-text"})
     monkeypatch.setattr("adsputils.setup_logging", lambda *args, **kwargs: dummy_logger)
@@ -37,6 +38,32 @@ def test_batch_pre_ingest_records_skips_header(monkeypatch, dummy_logger, tmp_pa
     module.batch_pre_ingest_records(str(records), batch_size=10)
 
     assert captured == [[{"title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/pre.tsv_123_classified.tsv", "run_id": 123}]]
+
+
+def test_batch_pre_ingest_records_accepts_identifier_header_and_bibcode_rows(monkeypatch, dummy_logger, tmp_path):
+    module = _import_run_module(monkeypatch, dummy_logger)
+    module.utils.list_to_ClassifyRequestRecordList = lambda payload: payload
+    records = tmp_path / "pre.tsv"
+    records.write_text("bibcode\ttitle\tabstract\n2022Natur.608Q.472D\tTitle 1\tAbstract 1\n")
+    captured = []
+    module.task_update_record.delay = lambda message: captured.append(message)
+
+    module.batch_pre_ingest_records(str(records), batch_size=10)
+
+    assert captured == [[{"bibcode": "2022Natur.608Q.472D", "title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/pre.tsv_123_classified.tsv", "run_id": 123}]]
+
+
+def test_batch_pre_ingest_records_accepts_scix_id_rows_without_header(monkeypatch, dummy_logger, tmp_path):
+    module = _import_run_module(monkeypatch, dummy_logger)
+    module.utils.list_to_ClassifyRequestRecordList = lambda payload: payload
+    records = tmp_path / "pre.tsv"
+    records.write_text("scix:abcd-1234-wxyz\tTitle 1\tAbstract 1\n")
+    captured = []
+    module.task_update_record.delay = lambda message: captured.append(message)
+
+    module.batch_pre_ingest_records(str(records), batch_size=10)
+
+    assert captured == [[{"scix_id": "scix:abcd-1234-wxyz", "title": "Title 1", "abstract": "Abstract 1", "operation_step": "pre_ingest", "output_path": "/prepared/pre.tsv_123_classified.tsv", "run_id": 123}]]
 
 
 def test_get_pre_ingest_delimiter_uses_extension_defaults(monkeypatch, dummy_logger):
@@ -199,6 +226,24 @@ def test_pre_ingest_row_to_dictionary_rejects_short_rows(monkeypatch, dummy_logg
     module = _import_run_module(monkeypatch, dummy_logger)
     with pytest.raises(ValueError, match="Expected 2 columns, got 1"):
         module.pre_ingest_row_to_dictionary(["only-title"])
+
+
+def test_pre_ingest_row_to_dictionary_accepts_bibcode_identifier(monkeypatch, dummy_logger):
+    module = _import_run_module(monkeypatch, dummy_logger)
+    record = module.pre_ingest_row_to_dictionary(["2022Natur.608Q.472D", "Title", "Abstract"])
+    assert record == {"bibcode": "2022Natur.608Q.472D", "title": "Title", "abstract": "Abstract", "operation_step": "pre_ingest"}
+
+
+def test_pre_ingest_row_to_dictionary_accepts_scix_id_identifier(monkeypatch, dummy_logger):
+    module = _import_run_module(monkeypatch, dummy_logger)
+    record = module.pre_ingest_row_to_dictionary(["scix:abcd-1234-wxyz", "Title", "Abstract"])
+    assert record == {"scix_id": "scix:abcd-1234-wxyz", "title": "Title", "abstract": "Abstract", "operation_step": "pre_ingest"}
+
+
+def test_pre_ingest_row_to_dictionary_rejects_invalid_identifier(monkeypatch, dummy_logger):
+    module = _import_run_module(monkeypatch, dummy_logger)
+    with pytest.raises(ValueError, match="Expected a bibcode or SciX ID"):
+        module.pre_ingest_row_to_dictionary(["not-an-id", "Title", "Abstract"])
 
 
 def test_batch_pre_ingest_records_reports_delimiter_help_on_short_rows(monkeypatch, dummy_logger, tmp_path):

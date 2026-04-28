@@ -128,7 +128,10 @@ def pre_ingest_row_to_dictionary(row, output_path=None):
     Parameters
     ----------
     row : list[str]
-        A row with at least two elements: [title, abstract]
+        Either:
+        - [title, abstract]
+        - [identifier, title, abstract], where `identifier` is either a
+          bibcode or a SciX ID (`scix:xxxx-xxxx-xxxx`).
 
     Returns
     -------
@@ -141,11 +144,17 @@ def pre_ingest_row_to_dictionary(row, output_path=None):
     if len(row) < 2:
         raise ValueError(f"Expected 2 columns, got {len(row)}: {row!r}")
 
-    record = {
-        'title': row[0],
-        'abstract': row[1],
-        'operation_step': 'pre_ingest',
-    }
+    record = {'operation_step': 'pre_ingest'}
+    if len(row) == 2:
+        record['title'] = row[0]
+        record['abstract'] = row[1]
+    else:
+        identifier_kind = utils.check_identifier(row[0])
+        if identifier_kind is None:
+            raise ValueError(f"Expected a bibcode or SciX ID in the first column, got {row[0]!r}")
+        record[identifier_kind] = row[0]
+        record['title'] = row[1]
+        record['abstract'] = row[2]
     if output_path:
         record['output_path'] = output_path
     return record
@@ -154,9 +163,10 @@ def pre_ingest_row_to_dictionary(row, output_path=None):
 def is_pre_ingest_header(row):
     if len(row) < 2:
         return False
-    first = str(row[0]).strip().lower()
-    second = str(row[1]).strip().lower()
-    return first == 'title' and second in {'abstract', 'text', 'body'}
+    normalized = [str(element).strip().lower() for element in row[:3]]
+    if len(normalized) >= 3 and normalized[0] in {'bibcode', 'scixid', 'scix_id'}:
+        return normalized[1] == 'title' and normalized[2] in {'abstract', 'text', 'body'}
+    return normalized[0] == 'title' and normalized[1] in {'abstract', 'text', 'body'}
 
 
 PRE_INGEST_DELIMITER_ALIASES = {

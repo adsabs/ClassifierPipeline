@@ -631,7 +631,7 @@ def test_task_index_classified_record_flushes_touched_output_paths_once_per_batc
     assert flushed == ["out.tsv"]
 
 
-def test_task_index_classified_record_pre_ingest_writes_output_only(monkeypatch, base_fake_config, dummy_logger):
+def test_task_index_classified_record_pre_ingest_without_identifiers_writes_output_only(monkeypatch, base_fake_config, dummy_logger):
     module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
     module.utils.classifyRequestRecordList_to_list = lambda message: [dict(item) for item in message]
     module.perf_metrics.emit_event = lambda **kwargs: None
@@ -652,6 +652,66 @@ def test_task_index_classified_record_pre_ingest_writes_output_only(monkeypatch,
     )
 
     assert written == ["T1", "T2"]
+    assert resent == []
+    assert flushed == ["out.tsv"]
+
+
+def test_task_index_classified_record_pre_ingest_with_identifiers_batch_indexes_records(monkeypatch, base_fake_config, dummy_logger):
+    module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
+    module.utils.classifyRequestRecordList_to_list = lambda message: [dict(item) for item in message]
+    module.perf_metrics.emit_event = lambda **kwargs: None
+    indexed = []
+    written = []
+    resent = []
+    flushed = []
+    module.app.index_record = lambda record: (_ for _ in ()).throw(AssertionError("identified pre_ingest should batch index"))
+    module.app.index_records_batch = lambda records: [(indexed.append(record["bibcode"]) or (record, "record_indexed")) for record in records]
+    module.utils.add_record_to_output_file = lambda record: written.append(record["bibcode"])
+    module.utils.flush_output_file = lambda output_path=None: flushed.append(output_path)
+    module.task_resend_to_master = lambda message: resent.append(message)
+
+    module.task_index_classified_record(
+        [
+            {"bibcode": "B1", "title": "T1", "operation_step": "pre_ingest", "run_id": "R", "output_path": "out.tsv"},
+            {"bibcode": "B2", "title": "T2", "operation_step": "pre_ingest", "run_id": "R", "output_path": "out.tsv"},
+        ]
+    )
+
+    assert indexed == ["B1", "B2"]
+    assert written == ["B1", "B2"]
+    assert resent == []
+    assert flushed == ["out.tsv"]
+
+
+def test_task_index_classified_record_pre_ingest_mixed_identifiers_preserves_order(monkeypatch, base_fake_config, dummy_logger):
+    module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
+    module.utils.classifyRequestRecordList_to_list = lambda message: [dict(item) for item in message]
+    module.perf_metrics.emit_event = lambda **kwargs: None
+    indexed_batches = []
+    written = []
+    resent = []
+    flushed = []
+
+    def batch_index(records):
+        indexed_batches.append([record.get("bibcode") or record.get("scix_id") for record in records])
+        return [(record, "record_indexed") for record in records]
+
+    module.app.index_record = lambda record: (_ for _ in ()).throw(AssertionError("mixed pre_ingest should not per-record index"))
+    module.app.index_records_batch = batch_index
+    module.utils.add_record_to_output_file = lambda record: written.append(record.get("bibcode") or record.get("scix_id") or record["title"])
+    module.utils.flush_output_file = lambda output_path=None: flushed.append(output_path)
+    module.task_resend_to_master = lambda message: resent.append(message)
+
+    module.task_index_classified_record(
+        [
+            {"title": "No ID 1", "operation_step": "pre_ingest", "run_id": "R", "output_path": "out.tsv"},
+            {"bibcode": "B1", "title": "With ID", "operation_step": "pre_ingest", "run_id": "R", "output_path": "out.tsv"},
+            {"title": "No ID 2", "operation_step": "pre_ingest", "run_id": "R", "output_path": "out.tsv"},
+        ]
+    )
+
+    assert indexed_batches == [["B1"]]
+    assert written == ["No ID 1", "B1", "No ID 2"]
     assert resent == []
     assert flushed == ["out.tsv"]
 
