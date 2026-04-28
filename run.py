@@ -284,7 +284,7 @@ def batch_pre_ingest_records(records_path, batch_size=500, output_prefix=None, d
     batch = []
     output_name = output_prefix or os.path.basename(records_path)
     delimiter = get_pre_ingest_delimiter(records_path, delimiter=delimiter)
-    prepared_output_path = prepare_pre_ingest_run(output_name, proj_home_path=proj_home)
+    run_id, prepared_output_path = prepare_pre_ingest_run(output_name, proj_home_path=proj_home)
 
     with open(records_path, 'r', newline='') as file:
         reader = csv.reader(file, delimiter=delimiter)
@@ -300,6 +300,7 @@ def batch_pre_ingest_records(records_path, batch_size=500, output_prefix=None, d
         for i, row in enumerate(rows, 1):
             try:
                 record = pre_ingest_row_to_dictionary(row, output_path=prepared_output_path)
+                record["run_id"] = run_id
                 batch.append(record)
             except ValueError as exc:
                 raise ValueError(
@@ -328,12 +329,15 @@ def queue_pre_ingest_input_text(text, output_prefix=None):
     text : str
         Free-form text to classify. Stored as the abstract with blank title.
     """
+    output_name = output_prefix or config.get('PRE_INGEST_OUTPUT_PREFIX', 'input-text')
+    run_id, output_path = prepare_pre_ingest_run(output_name, proj_home_path=proj_home)
     message = utils.list_to_ClassifyRequestRecordList([
         {
             'title': '',
             'abstract': text,
             'operation_step': 'pre_ingest',
-            'output_path': output_prefix or config.get('PRE_INGEST_OUTPUT_PREFIX', 'input-text'),
+            'run_id': run_id,
+            'output_path': output_path,
         }
     ])
     task_update_record.delay(message)

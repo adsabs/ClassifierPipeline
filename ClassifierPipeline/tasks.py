@@ -110,22 +110,18 @@ def generate_run_id(operation_step=None):
 def build_output_path(proj_home, operation_step, filename, run_id):
     """
     Build the batch output path for a run.
-
-    Pre-ingest uses a stable filename on purpose so one-shot ad hoc runs
-    overwrite prior output instead of accumulating per-run files.
     """
     safe_filename = filename or "pre-ingest"
-    if operation_step == "pre_ingest":
-        return os.path.join(proj_home, 'logs', f'{safe_filename}_classified.tsv')
     return os.path.join(proj_home, 'logs', f'{safe_filename}_{run_id}_classified.tsv')
 
 
 def prepare_pre_ingest_run(filename, proj_home_path=_UNSET):
     resolved_proj_home = proj_home if proj_home_path is _UNSET else proj_home_path
-    output_path = build_output_path(resolved_proj_home, "pre_ingest", filename, None)
+    run_id = app.index_run()
+    output_path = build_output_path(resolved_proj_home, "pre_ingest", filename, run_id)
     utils.prepare_output_file(output_path)
     logger.info(f'Prepared pre-ingest output file: {output_path}')
-    return output_path
+    return run_id, output_path
 
 
 # ============================= TASKS ============================================= #
@@ -161,8 +157,6 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
 
     if first_request.get("run_id") is not None:
         run_id = first_request.get("run_id")
-    elif operation_step == "pre_ingest":
-        run_id = None
     else:
         run_id = app.index_run(perf_metrics_context_id=context_id)
 

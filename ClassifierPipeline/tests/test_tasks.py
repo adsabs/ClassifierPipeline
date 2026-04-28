@@ -100,22 +100,22 @@ def test_generate_run_id_is_unique_positive_integer(monkeypatch, base_fake_confi
     assert run_id_one > 0
 
 
-def test_build_output_path_uses_stable_pre_ingest_filename(monkeypatch, base_fake_config, dummy_logger):
+def test_build_output_path_uses_run_id_for_pre_ingest(monkeypatch, base_fake_config, dummy_logger):
     module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
     output_path = module.build_output_path("/tmp/project", "pre_ingest", "custom-prefix", "RUNID")
-    assert output_path == "/tmp/project/logs/custom-prefix_classified.tsv"
+    assert output_path == "/tmp/project/logs/custom-prefix_RUNID_classified.tsv"
 
 
 def test_build_output_path_defaults_pre_ingest_filename_when_missing(monkeypatch, base_fake_config, dummy_logger):
     module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
     output_path = module.build_output_path("/tmp/project", "pre_ingest", None, "RUNID")
-    assert output_path == "/tmp/project/logs/pre-ingest_classified.tsv"
+    assert output_path == "/tmp/project/logs/pre-ingest_RUNID_classified.tsv"
 
 
 def test_build_output_path_defaults_pre_ingest_filename_when_empty(monkeypatch, base_fake_config, dummy_logger):
     module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
     output_path = module.build_output_path("/tmp/project", "pre_ingest", "", "RUNID")
-    assert output_path == "/tmp/project/logs/pre-ingest_classified.tsv"
+    assert output_path == "/tmp/project/logs/pre-ingest_RUNID_classified.tsv"
 
 
 def test_build_output_path_uses_run_id_for_non_pre_ingest(monkeypatch, base_fake_config, dummy_logger):
@@ -127,11 +127,13 @@ def test_build_output_path_uses_run_id_for_non_pre_ingest(monkeypatch, base_fake
 def test_prepare_pre_ingest_run_prepares_output(monkeypatch, base_fake_config, dummy_logger):
     module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
     prepared = []
+    module.app.index_run = lambda *args, **kwargs: "RUNID"
     module.utils.prepare_output_file = lambda path: prepared.append(path)
 
-    output_path = module.prepare_pre_ingest_run("custom-prefix", proj_home_path="/tmp/project")
+    run_id, output_path = module.prepare_pre_ingest_run("custom-prefix", proj_home_path="/tmp/project")
 
-    assert output_path == "/tmp/project/logs/custom-prefix_classified.tsv"
+    assert run_id == "RUNID"
+    assert output_path == "/tmp/project/logs/custom-prefix_RUNID_classified.tsv"
     assert prepared == [output_path]
 
 
@@ -207,23 +209,23 @@ def test_task_update_record_reuses_existing_run_id(monkeypatch, base_fake_config
     assert result["run_id"] == "EXISTING"
 
 
-def test_task_update_record_pre_ingest_skips_index_run(monkeypatch, base_fake_config, dummy_logger):
+def test_task_update_record_pre_ingest_reuses_existing_run_id(monkeypatch, base_fake_config, dummy_logger):
     module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
     prepared = []
     module.utils.prepare_output_file = lambda path: prepared.append(path)
     module.utils.classifyRequestRecordList_to_list = lambda message: [dict(message)]
     module.utils.list_to_ClassifyRequestRecordList = lambda payload: payload
     module.perf_metrics.emit_event = lambda **kwargs: None
-    module.app.index_run = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("pre_ingest should not index run"))
+    module.app.index_run = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("pre_ingest should reuse incoming run_id"))
     forwarded = []
     module.task_send_input_record_to_classifier = lambda message: forwarded.append(message)
 
-    result = module.task_update_record({"title": "T", "abstract": "A", "operation_step": "pre_ingest"})
+    result = module.task_update_record({"title": "T", "abstract": "A", "operation_step": "pre_ingest", "run_id": "RUNID"})
     assert result["records_submitted"] == 1
-    assert "run_id" not in result
-    assert prepared and prepared[0].endswith("/logs/pre-ingest_classified.tsv")
+    assert result["run_id"] == "RUNID"
+    assert prepared and prepared[0].endswith("/logs/pre-ingest_RUNID_classified.tsv")
     assert forwarded[0][0]["operation_step"] == "pre_ingest"
-    assert "run_id" not in forwarded[0][0]
+    assert forwarded[0][0]["run_id"] == "RUNID"
 
 
 def test_task_update_record_pre_ingest_preserves_custom_output_prefix(monkeypatch, base_fake_config, dummy_logger):
@@ -234,16 +236,17 @@ def test_task_update_record_pre_ingest_preserves_custom_output_prefix(monkeypatc
     module.utils.classifyRequestRecordList_to_list = lambda message: [dict(message)]
     module.utils.list_to_ClassifyRequestRecordList = lambda payload: payload
     module.perf_metrics.emit_event = lambda **kwargs: None
-    module.app.index_run = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("pre_ingest should not index run"))
+    module.app.index_run = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("pre_ingest should reuse incoming run_id"))
     module.task_send_input_record_to_classifier = lambda message: forwarded.append(message)
 
     result = module.task_update_record(
-        {"title": "T", "abstract": "A", "operation_step": "pre_ingest", "output_path": "custom-prefix"}
+        {"title": "T", "abstract": "A", "operation_step": "pre_ingest", "output_path": "custom-prefix", "run_id": "RUNID"}
     )
 
-    assert "run_id" not in result
-    assert prepared and prepared[0].endswith("/logs/custom-prefix_classified.tsv")
+    assert result["run_id"] == "RUNID"
+    assert prepared and prepared[0].endswith("/logs/custom-prefix_RUNID_classified.tsv")
     assert forwarded and forwarded[0][0]["output_path"] == prepared[0]
+    assert forwarded[0][0]["run_id"] == "RUNID"
 
 
 def test_task_update_record_pre_ingest_reuses_existing_output_without_repreparing(monkeypatch, base_fake_config, dummy_logger):
@@ -256,17 +259,18 @@ def test_task_update_record_pre_ingest_reuses_existing_output_without_repreparin
     module.utils.classifyRequestRecordList_to_list = lambda message: [dict(message)]
     module.utils.list_to_ClassifyRequestRecordList = lambda payload: payload
     module.perf_metrics.emit_event = lambda **kwargs: None
-    module.app.index_run = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("existing pre_ingest run should not index run"))
+    module.app.index_run = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("existing pre_ingest run should reuse incoming run_id"))
     module.task_send_input_record_to_classifier = lambda message: forwarded.append(message)
 
     result = module.task_update_record(
-        {"title": "T", "abstract": "A", "operation_step": "pre_ingest", "output_path": "/tmp/project/logs/custom-prefix_classified.tsv", "output_prepared": True}
+        {"title": "T", "abstract": "A", "operation_step": "pre_ingest", "output_path": "/tmp/project/logs/custom-prefix_RUNID_classified.tsv", "output_prepared": True, "run_id": "RUNID"}
     )
 
-    assert "run_id" not in result
+    assert result["run_id"] == "RUNID"
     assert prepared == []
     assert ensured == []
-    assert forwarded and forwarded[0][0]["output_path"] == "/tmp/project/logs/custom-prefix_classified.tsv"
+    assert forwarded and forwarded[0][0]["output_path"] == "/tmp/project/logs/custom-prefix_RUNID_classified.tsv"
+    assert forwarded[0][0]["run_id"] == "RUNID"
 
 
 def test_task_update_record_pre_ingest_replay_without_flag_ensures_output(monkeypatch, base_fake_config, dummy_logger):
@@ -280,19 +284,19 @@ def test_task_update_record_pre_ingest_replay_without_flag_ensures_output(monkey
     module.utils.classifyRequestRecordList_to_list = lambda message: [dict(message)]
     module.utils.list_to_ClassifyRequestRecordList = lambda payload: payload
     module.perf_metrics.emit_event = lambda **kwargs: None
-    module.app.index_run = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("existing pre_ingest run should not index run"))
+    module.app.index_run = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("existing pre_ingest run should reuse incoming run_id"))
     module.task_send_input_record_to_classifier = lambda message: forwarded.append(message)
     module.logger.warning = lambda message, *args: warnings.append(message % args if args else message)
 
     result = module.task_update_record(
-        {"title": "T", "abstract": "A", "operation_step": "pre_ingest", "output_path": "/tmp/project/logs/custom-prefix_classified.tsv"}
+        {"title": "T", "abstract": "A", "operation_step": "pre_ingest", "output_path": "/tmp/project/logs/custom-prefix_RUNID_classified.tsv", "run_id": "RUNID"}
     )
 
-    assert "run_id" not in result
+    assert result["run_id"] == "RUNID"
     assert prepared == []
-    assert ensured == ["/tmp/project/logs/custom-prefix_classified.tsv"]
-    assert forwarded and forwarded[0][0]["output_path"] == "/tmp/project/logs/custom-prefix_classified.tsv"
-    assert "run_id" not in forwarded[0][0]
+    assert ensured == ["/tmp/project/logs/custom-prefix_RUNID_classified.tsv"]
+    assert forwarded and forwarded[0][0]["output_path"] == "/tmp/project/logs/custom-prefix_RUNID_classified.tsv"
+    assert forwarded[0][0]["run_id"] == "RUNID"
     assert warnings and "missing `output_prepared`" in warnings[0]
 
 
