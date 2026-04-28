@@ -333,6 +333,12 @@ def test_filter_allowed_fields_preserves_integer_run_id(monkeypatch, base_fake_c
     assert filtered == {"bibcode": "B", "run_id": 123456789}
 
 
+def test_filter_allowed_fields_drops_output_prepared(monkeypatch, base_fake_config, dummy_logger):
+    module = _import_utilities(monkeypatch, base_fake_config, dummy_logger)
+    filtered = module.filter_allowed_fields({"bibcode": "B", "output_prepared": True, "run_id": 123456789})
+    assert filtered == {"bibcode": "B", "run_id": 123456789}
+
+
 def test_dict_to_response_record_uses_filtered_payload(monkeypatch, base_fake_config, dummy_logger):
     module = _import_utilities(monkeypatch, base_fake_config, dummy_logger)
     monkeypatch.setattr(module, "ClassifyResponseRecord", lambda: types.SimpleNamespace())
