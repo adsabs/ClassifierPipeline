@@ -109,7 +109,19 @@ def generate_run_id(operation_step=None):
 
 def build_output_path(proj_home, operation_step, filename, run_id):
     """
-    Build the batch output path for a run.
+    Build the run-scoped output path under the project logs directory.
+
+    Parameters
+    ----------
+    proj_home : str
+        Project root used as the base directory for `logs/`.
+    operation_step : str
+        Pipeline step associated with the output. All current run-based modes,
+        including `pre_ingest`, use the same filename shape.
+    filename : str
+        Output filename prefix. Falls back to ``"pre-ingest"`` when blank.
+    run_id : str | int
+        Run identifier to embed in the output filename.
     """
     safe_filename = filename or "pre-ingest"
     return os.path.join(proj_home, 'logs', f'{safe_filename}_{run_id}_classified.tsv')
@@ -178,9 +190,17 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
             should_prepare_output = False
         else:
             existing_output_path = first_request.get("output_path")
-            if operation_step == "pre_ingest" and existing_output_path and os.path.isabs(existing_output_path):
+            if (
+                operation_step == "pre_ingest"
+                and first_request.get("run_id") is not None
+                and existing_output_path
+                and os.path.isabs(existing_output_path)
+            ):
+                output_path = existing_output_path
+                should_prepare_output = False
+            elif operation_step == "pre_ingest" and existing_output_path and os.path.isabs(existing_output_path):
                 logger.warning(
-                    "Pre-ingest message missing `output_prepared`; treating absolute output_path as replay target: {}".format(
+                    "Pre-ingest message missing `run_id`; treating absolute output_path as replay target: {}".format(
                         existing_output_path
                     )
                 )
