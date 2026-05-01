@@ -64,7 +64,7 @@ logger = setup_logging('tasks.py', proj_home=proj_home,
 app.conf.CELERY_QUEUES = (
     Queue("update-record", app.exchange, routing_key="update-record"),
     Queue("classify-record", app.exchange, routing_key="classify-record"),
-    Queue("classify-record", app.exchange, routing_key="index-record"),
+    Queue("index-record", app.exchange, routing_key="index-record"),
     Queue("send-record-to-master", app.exchange, routing_key="send-record-to-master")
 )
 
