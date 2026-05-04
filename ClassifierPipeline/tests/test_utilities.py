@@ -50,6 +50,7 @@ def test_prepare_output_file_writes_header(monkeypatch, base_fake_config, dummy_
     assert text.startswith("bibcode\tscix_id\trun_id\ttitle\tcollections")
     assert "astrophysics_score" in text
     assert "gross_collection" in text
+    assert "gross_collection_override" in text
 
 
 def test_add_record_to_output_file_appends_row(monkeypatch, base_fake_config, dummy_logger, tmp_path):
@@ -95,7 +96,7 @@ def test_add_record_to_output_file_buffers_until_threshold(monkeypatch, base_fak
         current = dict(record, bibcode=f"B{index}")
         module.add_record_to_output_file(current)
     assert output.read_text().strip().splitlines() == [
-        "bibcode\tscix_id\trun_id\ttitle\tcollections\tcollection_scores\tastrophysics_score\theliophysics_score\tplanetary_science_score\tastronomy_score\tearth_science_score\tbiology_score\tphysics_score\tother_score\tgeneral_score\tgarbage_score\tgross_collection\toverride"
+        "bibcode\tscix_id\trun_id\ttitle\tcollections\tcollection_scores\tastrophysics_score\theliophysics_score\tplanetary_science_score\tastronomy_score\tearth_science_score\tbiology_score\tphysics_score\tother_score\tgeneral_score\tgarbage_score\tgross_collection\tgross_collection_override\toverride"
     ]
 
 
@@ -209,7 +210,7 @@ def test_build_output_row_uses_blank_identifiers_and_derived_scores(monkeypatch,
     assert row[:4] == ["", "", "R", "Title"]
     assert row[6:10] == [0.12, 0.23, 0.34, 0.34]
     assert row[10:15] == [0.91, 0.45, 0.81, 0.67, 0.91]
-    assert row[15:17] == [0.05, "general"]
+    assert row[15:18] == [0.05, "general", ""]
 
 
 def test_build_output_row_gross_collection_tie_breaks_to_astronomy(monkeypatch, base_fake_config, dummy_logger):
@@ -227,6 +228,21 @@ def test_build_output_row_gross_collection_tie_breaks_to_astronomy(monkeypatch, 
     assert row[12] == 0.5
     assert row[14] == 0.5
     assert row[16] == "astronomy"
+
+
+def test_build_output_row_preserves_gross_collection_override(monkeypatch, base_fake_config, dummy_logger):
+    module = _import_utilities(monkeypatch, base_fake_config, dummy_logger)
+    row = module.build_output_row(
+        {
+            "title": "Override",
+            "run_id": "R",
+            "collections": [],
+            "collection_scores": [],
+            "scores": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8],
+            "gross_collection_override": "physics",
+        }
+    )
+    assert row[17] == "physics"
 
 
 def test_safe_score_logs_debug_and_returns_zero_on_bad_payload(monkeypatch, base_fake_config, dummy_logger):

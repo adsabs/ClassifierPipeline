@@ -63,6 +63,7 @@ OUTPUT_HEADER = [
     'general_score',
     'garbage_score',
     'gross_collection',
+    'gross_collection_override',
     'override',
 ]
 
@@ -281,6 +282,7 @@ def build_output_row(record):
         scores['general_score'],
         scores['garbage_score'],
         scores['gross_collection'],
+        record.get('gross_collection_override') or '',
         '',
     ]
 

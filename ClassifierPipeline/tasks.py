@@ -264,6 +264,7 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
             enqueue_start = time.perf_counter()
             if delay_message:
                 logger.debug('Using delay')
+                logger.debug('Output Record before delay: {}'.format(out_message))
                 task_send_input_record_to_classifier.delay(out_message)
             else:
                 task_send_input_record_to_classifier(out_message)
@@ -407,6 +408,7 @@ def task_send_input_record_to_classifier(message):
         out_message = utils.list_to_ClassifyRequestRecordList(processed_records)
 
         if delay_message:
+            logger.debug('out_message before delay: {}'.format(out_message))
             task_index_classified_record.delay(out_message)
         else:
             task_index_classified_record(out_message)
@@ -429,6 +431,7 @@ def task_index_classified_record(message):
     records = utils.classifyRequestRecordList_to_list(message)
     run_id = records[0].get("run_id") if records else None
     context_id = _batch_context_id(records)
+    logger.debug("Records received for indexing: {}".format(records))
     with perf_metrics.timed_profile(
         category="task_timing",
         name="task_index_classified_record",
