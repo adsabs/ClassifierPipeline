@@ -341,6 +341,16 @@ def test_task_send_input_record_to_classifier_real_inference(monkeypatch, base_f
     assert any(event["stage"] == "task_timing" and event["extra"]["name"] == "task_send_input_record_to_classifier" for event in events)
 
 
+def test_pre_ingest_fingerprint_normalizes_whitespace_and_includes_run_id(monkeypatch, base_fake_config, dummy_logger):
+    module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
+    record_one = {"run_id": "R", "title": "  T  one ", "abstract": "A   two"}
+    record_two = {"run_id": "R", "title": "T one", "abstract": "A two"}
+    record_three = {"run_id": "R2", "title": "T one", "abstract": "A two"}
+
+    assert module._pre_ingest_fingerprint(record_one) == module._pre_ingest_fingerprint(record_two)
+    assert module._pre_ingest_fingerprint(record_one) != module._pre_ingest_fingerprint(record_three)
+
+
 def test_task_send_input_record_to_classifier_real_inference_batch(monkeypatch, base_fake_config, dummy_logger):
     module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
     module.config["FAKE_DATA"] = False
@@ -364,6 +374,66 @@ def test_task_send_input_record_to_classifier_real_inference_batch(monkeypatch, 
     module.task_send_input_record_to_classifier(message)
     assert calls == [["T1 A1", "T2 A2"]]
     assert [record["categories"] for record in forwarded[0]] == [["Astronomy"], ["Heliophysics"]]
+
+
+def test_task_send_input_record_to_classifier_skips_replayed_anonymous_pre_ingest(monkeypatch, base_fake_config, dummy_logger, tmp_path):
+    module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
+    module.config["FAKE_DATA"] = False
+    monkeypatch.delenv("PERF_FORCE_FAKE_DATA", raising=False)
+    module.utils.classifyRequestRecordList_to_list = lambda message: [dict(message)]
+    module.utils.classify_record_from_scores = lambda record: record
+    module.utils.list_to_ClassifyRequestRecordList = lambda payload: payload
+    module.perf_metrics.emit_event = lambda **kwargs: None
+    forwarded = []
+    calls = []
+
+    module.classifier = types.SimpleNamespace(
+        batch_score_SciX_categories=lambda texts, **kwargs: (calls.append(list(texts)) or ([["Astronomy"]], [[0.9]]))
+    )
+    module.task_index_classified_record = lambda message: forwarded.append(message)
+
+    message = {
+        "title": "T",
+        "abstract": "A",
+        "operation_step": "pre_ingest",
+        "run_id": "R",
+        "output_path": str(tmp_path / "out.tsv"),
+    }
+
+    module.task_send_input_record_to_classifier(message)
+    module.task_send_input_record_to_classifier(message)
+
+    assert calls == [["T A"]]
+    assert len(forwarded) == 1
+
+
+def test_task_send_input_record_to_classifier_only_classifies_new_anonymous_pre_ingest_records(monkeypatch, base_fake_config, dummy_logger, tmp_path):
+    module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
+    module.config["FAKE_DATA"] = False
+    monkeypatch.delenv("PERF_FORCE_FAKE_DATA", raising=False)
+    module.utils.classifyRequestRecordList_to_list = lambda message: [dict(item) for item in message] if isinstance(message, list) else [dict(message)]
+    module.utils.classify_record_from_scores = lambda record: record
+    module.utils.list_to_ClassifyRequestRecordList = lambda payload: payload
+    module.perf_metrics.emit_event = lambda **kwargs: None
+    forwarded = []
+    calls = []
+
+    def batch_score(texts, **kwargs):
+        calls.append(list(texts))
+        return [[f"cat-{index}"] for index, _ in enumerate(texts, 1)], [[0.9] for _ in texts]
+
+    module.classifier = types.SimpleNamespace(batch_score_SciX_categories=batch_score)
+    module.task_index_classified_record = lambda message: forwarded.append(message)
+
+    output_path = str(tmp_path / "out.tsv")
+    duplicate = {"title": "T1", "abstract": "A1", "operation_step": "pre_ingest", "run_id": "R", "output_path": output_path}
+    fresh = {"title": "T2", "abstract": "A2", "operation_step": "pre_ingest", "run_id": "R", "output_path": output_path}
+
+    module.task_send_input_record_to_classifier(duplicate)
+    module.task_send_input_record_to_classifier([duplicate, fresh])
+
+    assert calls == [["T1 A1"], ["T2 A2"]]
+    assert [record["title"] for record in forwarded[1]] == ["T2"]
 
 
 def test_task_send_input_record_to_classifier_honors_pre_forward_batch_size(monkeypatch, base_fake_config, dummy_logger):
@@ -654,6 +724,31 @@ def test_task_index_classified_record_pre_ingest_without_identifiers_writes_outp
     assert written == ["T1", "T2"]
     assert resent == []
     assert flushed == ["out.tsv"]
+
+
+def test_task_index_classified_record_pre_ingest_without_identifiers_skips_replayed_rows(monkeypatch, base_fake_config, dummy_logger, tmp_path):
+    module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
+    module.utils.classifyRequestRecordList_to_list = lambda message: [dict(item) for item in message]
+    module.perf_metrics.emit_event = lambda **kwargs: None
+    module.app.index_record = lambda record: (_ for _ in ()).throw(AssertionError("pre_ingest should not index records"))
+    module.app.index_records_batch = lambda records: (_ for _ in ()).throw(AssertionError("pre_ingest should not batch index"))
+    written = []
+    flushed = []
+    module.utils.add_record_to_output_file = lambda record: written.append(record["title"])
+    module.utils.flush_output_file = lambda output_path=None: flushed.append(output_path)
+    module.task_resend_to_master = lambda message: None
+
+    output_path = str(tmp_path / "out.tsv")
+    payload = [
+        {"title": "T1", "abstract": "A1", "operation_step": "pre_ingest", "run_id": "R", "output_path": output_path},
+        {"title": "T2", "abstract": "A2", "operation_step": "pre_ingest", "run_id": "R", "output_path": output_path},
+    ]
+
+    module.task_index_classified_record(payload)
+    module.task_index_classified_record(payload)
+
+    assert written == ["T1", "T2"]
+    assert flushed == [output_path]
 
 
 def test_task_index_classified_record_pre_ingest_with_identifiers_batch_indexes_records(monkeypatch, base_fake_config, dummy_logger):

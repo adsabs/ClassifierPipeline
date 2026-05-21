@@ -36,6 +36,9 @@ import os
 import json
 import time
 import itertools
+import hashlib
+import re
+import sqlite3
 import adsputils
 from adsputils import ADSCelery
 import ClassifierPipeline.app as app_module
@@ -72,6 +75,8 @@ app.conf.CELERY_QUEUES = (
 classifier = Classifier()
 _UNSET = object()
 _RUN_ID_COUNTER = itertools.count()
+_PRE_INGEST_CLASSIFY_LEASE_SECONDS = 300
+_PRE_INGEST_INDEX_LEASE_SECONDS = 120
 
 
 def _record_identifier(record):
@@ -99,6 +104,127 @@ def _resolve_positive_int_config(name, default):
     except (TypeError, ValueError):
         pass
     return default
+
+
+def _is_anonymous_pre_ingest_record(record):
+    return (
+        record.get("operation_step") == "pre_ingest"
+        and not record.get("bibcode")
+        and not record.get("scix_id")
+    )
+
+
+def _normalize_pre_ingest_identity_value(value):
+    return re.sub(r"\s+", " ", str(value or "").strip())
+
+
+def _pre_ingest_fingerprint(record):
+    canonical = "|".join(
+        [
+            _normalize_pre_ingest_identity_value(record.get("run_id")),
+            _normalize_pre_ingest_identity_value(record.get("title")),
+            _normalize_pre_ingest_identity_value(record.get("abstract")),
+        ]
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _pre_ingest_state_db_path(output_path):
+    return "{}.pre_ingest_state.sqlite3".format(output_path)
+
+
+def _connect_pre_ingest_state_db(output_path):
+    database_path = _pre_ingest_state_db_path(output_path)
+    connection = sqlite3.connect(database_path)
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS anonymous_pre_ingest_state (
+            fingerprint TEXT PRIMARY KEY,
+            stage TEXT NOT NULL,
+            lease_until REAL,
+            updated_at REAL NOT NULL
+        )
+        """
+    )
+    return connection
+
+
+def _claim_anonymous_pre_ingest_stage(record, target_stage, lease_seconds, now=None):
+    if not _is_anonymous_pre_ingest_record(record) or not record.get("output_path"):
+        return True
+
+    allowed_prior_stage = {
+        "classify_inflight": None,
+        "index_inflight": "classify_done",
+    }[target_stage]
+    fingerprint = _pre_ingest_fingerprint(record)
+    timestamp = time.time() if now is None else now
+    lease_until = timestamp + lease_seconds
+
+    with _connect_pre_ingest_state_db(record["output_path"]) as connection:
+        current_row = connection.execute(
+            "SELECT stage, lease_until FROM anonymous_pre_ingest_state WHERE fingerprint = ?",
+            (fingerprint,),
+        ).fetchone()
+
+        if current_row is None:
+            connection.execute(
+                """
+                INSERT INTO anonymous_pre_ingest_state (fingerprint, stage, lease_until, updated_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (fingerprint, target_stage, lease_until, timestamp),
+            )
+            return True
+
+        current_stage, current_lease_until = current_row
+        current_lease_until = float(current_lease_until or 0.0)
+
+        if current_stage == "indexed_done":
+            return False
+
+        if target_stage == "classify_inflight":
+            if current_stage in {"classify_done", "index_inflight"}:
+                return False
+            if current_stage == "classify_inflight" and current_lease_until > timestamp:
+                return False
+        else:
+            if current_stage == "index_inflight" and current_lease_until > timestamp:
+                return False
+            if current_stage != allowed_prior_stage and not (
+                current_stage == target_stage and current_lease_until <= timestamp
+            ):
+                return False
+
+        connection.execute(
+            """
+            UPDATE anonymous_pre_ingest_state
+            SET stage = ?, lease_until = ?, updated_at = ?
+            WHERE fingerprint = ?
+            """,
+            (target_stage, lease_until, timestamp, fingerprint),
+        )
+        return True
+
+
+def _mark_anonymous_pre_ingest_stage(record, stage, now=None):
+    if not _is_anonymous_pre_ingest_record(record) or not record.get("output_path"):
+        return
+
+    fingerprint = _pre_ingest_fingerprint(record)
+    timestamp = time.time() if now is None else now
+    with _connect_pre_ingest_state_db(record["output_path"]) as connection:
+        connection.execute(
+            """
+            INSERT INTO anonymous_pre_ingest_state (fingerprint, stage, lease_until, updated_at)
+            VALUES (?, ?, NULL, ?)
+            ON CONFLICT(fingerprint) DO UPDATE SET
+                stage = excluded.stage,
+                lease_until = NULL,
+                updated_at = excluded.updated_at
+            """,
+            (fingerprint, stage, timestamp),
+        )
 
 
 def generate_run_id(operation_step=None):
@@ -321,6 +447,21 @@ def task_send_input_record_to_classifier(message):
         delay_message = config.get('DELAY_MESSAGE', False)
         logger.debug("Delay set for queue messages: {}".format(delay_message))
 
+        claimed_records = []
+        for index, record in enumerate(records):
+            if _claim_anonymous_pre_ingest_stage(
+                record,
+                "classify_inflight",
+                _PRE_INGEST_CLASSIFY_LEASE_SECONDS,
+            ):
+                claimed_records.append(record)
+
+        if not claimed_records:
+            logger.info("Skipping classify task because all anonymous pre-ingest records were already processed")
+            return
+
+        records = claimed_records
+
         fake_data = config.get('FAKE_DATA', False)
         forced_fake_data = os.getenv("PERF_FORCE_FAKE_DATA")
         if forced_fake_data is not None:
@@ -405,6 +546,9 @@ def task_send_input_record_to_classifier(message):
         logger.debug("Records after classification and thresholding: {}".format(processed_records))
         logger.debug("Record Type: {}".format(type(processed_records)))
 
+        for record in processed_records:
+            _mark_anonymous_pre_ingest_stage(record, "classify_done")
+
         out_message = utils.list_to_ClassifyRequestRecordList(processed_records)
 
         if delay_message:
@@ -455,7 +599,16 @@ def task_index_classified_record(message):
             results = app.index_records_batch(records)
         elif records and all(record.get("operation_step") == "pre_ingest" for record in records):
             indexed_specs = [(index, record) for index, record in enumerate(records) if _has_identifier(record)]
-            anonymous_specs = [(index, record) for index, record in enumerate(records) if not _has_identifier(record)]
+            anonymous_specs = []
+            for index, record in enumerate(records):
+                if _has_identifier(record):
+                    continue
+                if _claim_anonymous_pre_ingest_stage(
+                    record,
+                    "index_inflight",
+                    _PRE_INGEST_INDEX_LEASE_SECONDS,
+                ):
+                    anonymous_specs.append((index, record))
             indexed_results = []
             if indexed_specs:
                 indexed_results = app.index_records_batch([record for _, record in indexed_specs])
@@ -464,7 +617,7 @@ def task_index_classified_record(message):
                 ordered_results[index] = result
             for index, record in anonymous_specs:
                 ordered_results[index] = (record, "record_pre_ingested")
-            results = [ordered_results[index] for index in range(len(records))]
+            results = [ordered_results[index] for index in range(len(records)) if index in ordered_results]
         else:
             for record in records:
                 results.append(app.index_record(record))
@@ -509,6 +662,7 @@ def task_index_classified_record(message):
                 utils.add_record_to_output_file(record)
                 if record.get("output_path"):
                     touched_output_paths.add(record["output_path"])
+                _mark_anonymous_pre_ingest_stage(record, "indexed_done")
 
             elif success == "record_validated":
                 resend_message = utils.list_to_ClassifyRequestRecordList([record])
