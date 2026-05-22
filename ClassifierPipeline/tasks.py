@@ -106,12 +106,8 @@ def _resolve_positive_int_config(name, default):
     return default
 
 
-def _is_anonymous_pre_ingest_record(record):
-    return (
-        record.get("operation_step") == "pre_ingest"
-        and not record.get("bibcode")
-        and not record.get("scix_id")
-    )
+def _is_pre_ingest_record(record):
+    return record.get("operation_step") == "pre_ingest"
 
 
 def _normalize_pre_ingest_identity_value(value):
@@ -119,13 +115,24 @@ def _normalize_pre_ingest_identity_value(value):
 
 
 def _pre_ingest_fingerprint(record):
-    canonical = "|".join(
-        [
-            _normalize_pre_ingest_identity_value(record.get("run_id")),
-            _normalize_pre_ingest_identity_value(record.get("title")),
-            _normalize_pre_ingest_identity_value(record.get("abstract")),
-        ]
-    )
+    canonical_parts = [_normalize_pre_ingest_identity_value(record.get("run_id"))]
+    if record.get("scix_id"):
+        canonical_parts.extend(
+            ["scix_id", _normalize_pre_ingest_identity_value(record.get("scix_id"))]
+        )
+    elif record.get("bibcode"):
+        canonical_parts.extend(
+            ["bibcode", _normalize_pre_ingest_identity_value(record.get("bibcode"))]
+        )
+    else:
+        canonical_parts.extend(
+            [
+                "text",
+                _normalize_pre_ingest_identity_value(record.get("title")),
+                _normalize_pre_ingest_identity_value(record.get("abstract")),
+            ]
+        )
+    canonical = "|".join(canonical_parts)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
@@ -138,7 +145,7 @@ def _connect_pre_ingest_state_db(output_path):
     connection = sqlite3.connect(database_path)
     connection.execute(
         """
-        CREATE TABLE IF NOT EXISTS anonymous_pre_ingest_state (
+        CREATE TABLE IF NOT EXISTS pre_ingest_state (
             fingerprint TEXT PRIMARY KEY,
             stage TEXT NOT NULL,
             lease_until REAL,
@@ -149,8 +156,8 @@ def _connect_pre_ingest_state_db(output_path):
     return connection
 
 
-def _claim_anonymous_pre_ingest_stage(record, target_stage, lease_seconds, now=None):
-    if not _is_anonymous_pre_ingest_record(record) or not record.get("output_path"):
+def _claim_pre_ingest_stage(record, target_stage, lease_seconds, now=None):
+    if not _is_pre_ingest_record(record) or not record.get("output_path"):
         return True
 
     allowed_prior_stage = {
@@ -163,14 +170,14 @@ def _claim_anonymous_pre_ingest_stage(record, target_stage, lease_seconds, now=N
 
     with _connect_pre_ingest_state_db(record["output_path"]) as connection:
         current_row = connection.execute(
-            "SELECT stage, lease_until FROM anonymous_pre_ingest_state WHERE fingerprint = ?",
+            "SELECT stage, lease_until FROM pre_ingest_state WHERE fingerprint = ?",
             (fingerprint,),
         ).fetchone()
 
         if current_row is None:
             connection.execute(
                 """
-                INSERT INTO anonymous_pre_ingest_state (fingerprint, stage, lease_until, updated_at)
+                INSERT INTO pre_ingest_state (fingerprint, stage, lease_until, updated_at)
                 VALUES (?, ?, ?, ?)
                 """,
                 (fingerprint, target_stage, lease_until, timestamp),
@@ -198,7 +205,7 @@ def _claim_anonymous_pre_ingest_stage(record, target_stage, lease_seconds, now=N
 
         connection.execute(
             """
-            UPDATE anonymous_pre_ingest_state
+            UPDATE pre_ingest_state
             SET stage = ?, lease_until = ?, updated_at = ?
             WHERE fingerprint = ?
             """,
@@ -207,8 +214,8 @@ def _claim_anonymous_pre_ingest_stage(record, target_stage, lease_seconds, now=N
         return True
 
 
-def _mark_anonymous_pre_ingest_stage(record, stage, now=None):
-    if not _is_anonymous_pre_ingest_record(record) or not record.get("output_path"):
+def _mark_pre_ingest_stage(record, stage, now=None):
+    if not _is_pre_ingest_record(record) or not record.get("output_path"):
         return
 
     fingerprint = _pre_ingest_fingerprint(record)
@@ -216,7 +223,7 @@ def _mark_anonymous_pre_ingest_stage(record, stage, now=None):
     with _connect_pre_ingest_state_db(record["output_path"]) as connection:
         connection.execute(
             """
-            INSERT INTO anonymous_pre_ingest_state (fingerprint, stage, lease_until, updated_at)
+            INSERT INTO pre_ingest_state (fingerprint, stage, lease_until, updated_at)
             VALUES (?, ?, NULL, ?)
             ON CONFLICT(fingerprint) DO UPDATE SET
                 stage = excluded.stage,
@@ -449,7 +456,7 @@ def task_send_input_record_to_classifier(message):
 
         claimed_records = []
         for index, record in enumerate(records):
-            if _claim_anonymous_pre_ingest_stage(
+            if _claim_pre_ingest_stage(
                 record,
                 "classify_inflight",
                 _PRE_INGEST_CLASSIFY_LEASE_SECONDS,
@@ -457,7 +464,7 @@ def task_send_input_record_to_classifier(message):
                 claimed_records.append(record)
 
         if not claimed_records:
-            logger.info("Skipping classify task because all anonymous pre-ingest records were already processed")
+            logger.info("Skipping classify task because all pre-ingest records were already processed")
             return
 
         records = claimed_records
@@ -547,7 +554,7 @@ def task_send_input_record_to_classifier(message):
         logger.debug("Record Type: {}".format(type(processed_records)))
 
         for record in processed_records:
-            _mark_anonymous_pre_ingest_stage(record, "classify_done")
+            _mark_pre_ingest_stage(record, "classify_done")
 
         out_message = utils.list_to_ClassifyRequestRecordList(processed_records)
 
@@ -598,17 +605,16 @@ def task_index_classified_record(message):
         if records and all(record.get("operation_step") in {"classify", "classify_verify"} for record in records):
             results = app.index_records_batch(records)
         elif records and all(record.get("operation_step") == "pre_ingest" for record in records):
-            indexed_specs = [(index, record) for index, record in enumerate(records) if _has_identifier(record)]
-            anonymous_specs = []
+            claimed_specs = []
             for index, record in enumerate(records):
-                if _has_identifier(record):
-                    continue
-                if _claim_anonymous_pre_ingest_stage(
+                if _claim_pre_ingest_stage(
                     record,
                     "index_inflight",
                     _PRE_INGEST_INDEX_LEASE_SECONDS,
                 ):
-                    anonymous_specs.append((index, record))
+                    claimed_specs.append((index, record))
+            indexed_specs = [(index, record) for index, record in claimed_specs if _has_identifier(record)]
+            anonymous_specs = [(index, record) for index, record in claimed_specs if not _has_identifier(record)]
             indexed_results = []
             if indexed_specs:
                 indexed_results = app.index_records_batch([record for _, record in indexed_specs])
@@ -649,6 +655,8 @@ def task_index_classified_record(message):
                     utils.add_record_to_output_file(record)
                     if record.get("output_path"):
                         touched_output_paths.add(record["output_path"])
+                    if record['operation_step'] == 'pre_ingest':
+                        _mark_pre_ingest_stage(record, "indexed_done")
                 if record['operation_step'] == 'classify':
                     logger.info(f"Record {record_id} indexed")
                     app.add_record_to_output_file(record)
@@ -662,7 +670,7 @@ def task_index_classified_record(message):
                 utils.add_record_to_output_file(record)
                 if record.get("output_path"):
                     touched_output_paths.add(record["output_path"])
-                _mark_anonymous_pre_ingest_stage(record, "indexed_done")
+                _mark_pre_ingest_stage(record, "indexed_done")
 
             elif success == "record_validated":
                 resend_message = utils.list_to_ClassifyRequestRecordList([record])
