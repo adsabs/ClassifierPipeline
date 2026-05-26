@@ -291,6 +291,51 @@ def test_queue_pre_ingest_input_text_uses_override_prefix(monkeypatch, dummy_log
     assert captured[0][0]["run_id"] == 123
 
 
+def test_prepare_records_reads_abstract_from_headered_tsv(monkeypatch, dummy_logger, tmp_path):
+    module = _import_run_module(monkeypatch, dummy_logger)
+    records = tmp_path / "classified.tsv"
+    records.write_text(
+        "bibcode\tscix_id\trun_id\ttitle\tabstract\tcollections\tcollection_scores\tastrophysics_score\theliophysics_score\tplanetary_science_score\tastronomy_score\tearth_science_score\tbiology_score\tphysics_score\tother_score\tgeneral_score\tgarbage_score\tgross_collection\tgross_collection_override\toverride\n"
+        "2022Natur.608Q.472D\t\tRUN1\tTitle 1\tAbstract 1\tAstronomy\t0.9\t0.9\t0.1\t0.2\t0.9\t0.0\t0.0\t0.0\t0.0\t0.0\t0.0\tastronomy\t\tAstronomy,Earth Science\n"
+    )
+    captured = []
+    module.utils.list_to_ClassifyRequestRecordList = lambda payload: payload
+    module.task_index_classified_record = lambda message: captured.append(message)
+
+    module.prepare_records(str(records))
+
+    assert captured == [[{
+        "bibcode": "2022Natur.608Q.472D",
+        "run_id": "RUN1",
+        "title": "Title 1",
+        "abstract": "Abstract 1",
+        "operation_step": "validate",
+        "override": ["Astronomy", "Earth Science"],
+    }]]
+
+
+def test_prepare_records_supports_legacy_tsv_without_abstract(monkeypatch, dummy_logger, tmp_path):
+    module = _import_run_module(monkeypatch, dummy_logger)
+    records = tmp_path / "legacy.tsv"
+    records.write_text(
+        "bibcode\tscix_id\trun_id\ttitle\tcollections\tcollection_scores\tastrophysics_score\theliophysics_score\tplanetary_science_score\tastronomy_score\tearth_science_score\tbiology_score\tphysics_score\tother_score\tgeneral_score\tgarbage_score\tgross_collection\tgross_collection_override\toverride\n"
+        "2022Natur.608Q.472D\t\tRUN1\tTitle 1\tAstronomy\t0.9\t0.9\t0.1\t0.2\t0.9\t0.0\t0.0\t0.0\t0.0\t0.0\t0.0\tastronomy\t\tAstronomy,Earth Science\n"
+    )
+    captured = []
+    module.utils.list_to_ClassifyRequestRecordList = lambda payload: payload
+    module.task_index_classified_record = lambda message: captured.append(message)
+
+    module.prepare_records(str(records))
+
+    assert captured == [[{
+        "bibcode": "2022Natur.608Q.472D",
+        "run_id": "RUN1",
+        "title": "Title 1",
+        "operation_step": "validate",
+        "override": ["Astronomy", "Earth Science"],
+    }]]
+
+
 def test_main_rejects_input_text_without_pre_ingest(monkeypatch, dummy_logger):
     module = _import_run_module(monkeypatch, dummy_logger)
 

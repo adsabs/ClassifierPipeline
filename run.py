@@ -404,7 +404,8 @@ def prepare_records(records_path, operation_step='validate'):
     1 : scix_id (or blank)
     2 : run_id
     3 : title
-    14: override (comma-separated categories)
+    4 : abstract
+    15: override (comma-separated categories)
     """
     print(f'Processing records from: {records_path}')
     print()
@@ -413,7 +414,9 @@ def prepare_records(records_path, operation_step='validate'):
         csv_reader = csv.reader(f, delimiter='\t')
         headers = next(csv_reader)
         header_positions = {name: index for index, name in enumerate(headers)}
-        override_index = header_positions.get('override', 14)
+        title_index = header_positions.get('title', 3)
+        abstract_index = header_positions.get('abstract')
+        override_index = header_positions.get('override', 15 if abstract_index is not None else 14)
 
         for row in csv_reader:
             print(f'Processing row: {row}')
@@ -423,7 +426,9 @@ def prepare_records(records_path, operation_step='validate'):
             elif utils.check_identifier(row[1]) == 'scix_id':
                 record['scix_id'] = row[1]
             record['run_id'] = row[2]
-            record['title'] = row[3]
+            record['title'] = row[title_index]
+            if abstract_index is not None and abstract_index < len(row):
+                record['abstract'] = row[abstract_index]
             record['operation_step'] = operation_step
 
             record['override'] = row[override_index].split(',')

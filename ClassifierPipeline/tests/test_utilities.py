@@ -47,7 +47,7 @@ def test_prepare_output_file_writes_header(monkeypatch, base_fake_config, dummy_
     output = tmp_path / "out.tsv"
     module.prepare_output_file(str(output))
     text = output.read_text()
-    assert text.startswith("bibcode\tscix_id\trun_id\ttitle\tcollections")
+    assert text.startswith("bibcode\tscix_id\trun_id\ttitle\tabstract\tcollections")
     assert "astrophysics_score" in text
     assert "gross_collection" in text
     assert "gross_collection_override" in text
@@ -62,6 +62,7 @@ def test_add_record_to_output_file_appends_row(monkeypatch, base_fake_config, du
         "scix_id": "S",
         "run_id": "R",
         "title": "Title",
+        "abstract": "Abstract",
         "collections": ["Astronomy", "Other"],
         "collection_scores": [0.61, 0.21],
         "scores": [0.61, 0.2, 0.4, 0.5, 0.1, 0.35, 0.21, 0.1],
@@ -71,11 +72,11 @@ def test_add_record_to_output_file_appends_row(monkeypatch, base_fake_config, du
     module.flush_output_file(str(output))
     lines = output.read_text().strip().splitlines()
     assert len(lines) == 2
-    assert lines[1].startswith("B\tS\tR\tTitle\tAstronomy, Other")
+    assert lines[1].startswith("B\tS\tR\tTitle\tAbstract\tAstronomy, Other")
     columns = lines[1].split("\t")
-    assert columns[6:10] == ["0.61", "0.2", "0.4", "0.61"]
-    assert columns[10:15] == ["0.5", "0.1", "0.35", "0.21", "0.5"]
-    assert columns[15:17] == ["0.1", "astronomy"]
+    assert columns[7:11] == ["0.61", "0.2", "0.4", "0.61"]
+    assert columns[11:16] == ["0.5", "0.1", "0.35", "0.21", "0.5"]
+    assert columns[16:18] == ["0.1", "astronomy"]
 
 
 def test_add_record_to_output_file_buffers_until_threshold(monkeypatch, base_fake_config, dummy_logger, tmp_path):
@@ -87,6 +88,7 @@ def test_add_record_to_output_file_buffers_until_threshold(monkeypatch, base_fak
         "scix_id": "S",
         "run_id": "R",
         "title": "Title",
+        "abstract": "Abstract",
         "collections": ["Astronomy"],
         "collection_scores": [0.61],
         "scores": [0.61, 0.2, 0.4, 0.5, 0.1, 0.35, 0.21, 0.1],
@@ -96,7 +98,7 @@ def test_add_record_to_output_file_buffers_until_threshold(monkeypatch, base_fak
         current = dict(record, bibcode=f"B{index}")
         module.add_record_to_output_file(current)
     assert output.read_text().strip().splitlines() == [
-        "bibcode\tscix_id\trun_id\ttitle\tcollections\tcollection_scores\tastrophysics_score\theliophysics_score\tplanetary_science_score\tastronomy_score\tearth_science_score\tbiology_score\tphysics_score\tother_score\tgeneral_score\tgarbage_score\tgross_collection\tgross_collection_override\toverride"
+        "bibcode\tscix_id\trun_id\ttitle\tabstract\tcollections\tcollection_scores\tastrophysics_score\theliophysics_score\tplanetary_science_score\tastronomy_score\tearth_science_score\tbiology_score\tphysics_score\tother_score\tgeneral_score\tgarbage_score\tgross_collection\tgross_collection_override\toverride"
     ]
 
 
@@ -109,6 +111,7 @@ def test_add_record_to_output_file_flushes_at_threshold(monkeypatch, base_fake_c
         "scix_id": "S",
         "run_id": "R",
         "title": "Title",
+        "abstract": "Abstract",
         "collections": ["Astronomy"],
         "collection_scores": [0.61],
         "scores": [0.61, 0.2, 0.4, 0.5, 0.1, 0.35, 0.21, 0.1],
@@ -129,6 +132,7 @@ def test_flush_output_file_flushes_remaining_rows(monkeypatch, base_fake_config,
         "scix_id": "S",
         "run_id": "R",
         "title": "Title",
+        "abstract": "Abstract",
         "collections": ["Astronomy"],
         "collection_scores": [0.61],
         "scores": [0.61, 0.2, 0.4, 0.5, 0.1, 0.35, 0.21, 0.1],
@@ -148,6 +152,7 @@ def test_prepare_output_file_resets_existing_buffer(monkeypatch, base_fake_confi
         "scix_id": "S",
         "run_id": "R",
         "title": "Title",
+        "abstract": "Abstract",
         "collections": ["Astronomy"],
         "collection_scores": [0.61],
         "scores": [0.61, 0.2, 0.4, 0.5, 0.1, 0.35, 0.21, 0.1],
@@ -201,16 +206,17 @@ def test_build_output_row_uses_blank_identifiers_and_derived_scores(monkeypatch,
     row = module.build_output_row(
         {
             "title": "Title",
+            "abstract": "Abstract",
             "run_id": "R",
             "collections": ["Other Physics"],
             "collection_scores": [0.81],
             "scores": [0.12, 0.23, 0.34, 0.91, 0.45, 0.81, 0.67, 0.05],
         }
     )
-    assert row[:4] == ["", "", "R", "Title"]
-    assert row[6:10] == [0.12, 0.23, 0.34, 0.34]
-    assert row[10:15] == [0.91, 0.45, 0.81, 0.67, 0.91]
-    assert row[15:18] == [0.05, "general", ""]
+    assert row[:5] == ["", "", "R", "Title", "Abstract"]
+    assert row[7:11] == [0.12, 0.23, 0.34, 0.34]
+    assert row[11:16] == [0.91, 0.45, 0.81, 0.67, 0.91]
+    assert row[16:19] == [0.05, "general", ""]
 
 
 def test_build_output_row_gross_collection_tie_breaks_to_astronomy(monkeypatch, base_fake_config, dummy_logger):
@@ -218,16 +224,17 @@ def test_build_output_row_gross_collection_tie_breaks_to_astronomy(monkeypatch, 
     row = module.build_output_row(
         {
             "title": "Tie",
+            "abstract": "Abstract",
             "run_id": "R",
             "collections": [],
             "collection_scores": [],
             "scores": [0.5, 0.4, 0.3, 0.5, 0.4, 0.5, 0.2, 0.1],
         }
     )
-    assert row[9] == 0.5
-    assert row[12] == 0.5
-    assert row[14] == 0.5
-    assert row[16] == "astronomy"
+    assert row[10] == 0.5
+    assert row[13] == 0.5
+    assert row[15] == 0.5
+    assert row[17] == "astronomy"
 
 
 def test_build_output_row_preserves_gross_collection_override(monkeypatch, base_fake_config, dummy_logger):
@@ -235,6 +242,7 @@ def test_build_output_row_preserves_gross_collection_override(monkeypatch, base_
     row = module.build_output_row(
         {
             "title": "Override",
+            "abstract": "Abstract",
             "run_id": "R",
             "collections": [],
             "collection_scores": [],
@@ -242,7 +250,7 @@ def test_build_output_row_preserves_gross_collection_override(monkeypatch, base_
             "gross_collection_override": "physics",
         }
     )
-    assert row[17] == "physics"
+    assert row[18] == "physics"
 
 
 def test_safe_score_logs_debug_and_returns_zero_on_bad_payload(monkeypatch, base_fake_config, dummy_logger):
