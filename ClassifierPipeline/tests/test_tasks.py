@@ -22,6 +22,7 @@ def _import_tasks_module(monkeypatch, base_fake_config, dummy_logger):
         index_records_batch=lambda records: [(record, "record_indexed") for record in records],
         add_record_to_output_file=lambda record: None,
         query_final_collection_table=lambda **kwargs: [],
+        query_recently_validated_final_collection_table=lambda **kwargs: [],
         update_validated_records=lambda run_id: ([], []),
         forward_message=lambda message: None,
         task=IdentityDecorator(),
@@ -1040,6 +1041,36 @@ def test_task_resend_to_master_run_id_path(monkeypatch, base_fake_config, dummy_
     module.task_message_to_master = lambda message: forwarded.append(message)
     module.task_resend_to_master({"run_id": "R"})
     assert forwarded == [{"bibcode": "B"}]
+
+
+def test_task_resend_validated_to_master_forwards_recent_records(monkeypatch, base_fake_config, dummy_logger):
+    module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
+    module.app.query_recently_validated_final_collection_table = lambda **kwargs: [
+        {"bibcode": "B1", "collections": ["Astronomy"]},
+        {"scix_id": "S2", "collections": ["Physics"]},
+    ]
+    module.perf_metrics.emit_event = lambda **kwargs: None
+    forwarded = []
+    module.task_message_to_master = lambda message: forwarded.append(message)
+
+    module.task_resend_validated_to_master(7)
+
+    assert forwarded == [
+        {"bibcode": "B1", "collections": ["Astronomy"]},
+        {"scix_id": "S2", "collections": ["Physics"]},
+    ]
+
+
+def test_task_resend_validated_to_master_forwards_nothing_for_empty_result(monkeypatch, base_fake_config, dummy_logger):
+    module, _ = _import_tasks_module(monkeypatch, base_fake_config, dummy_logger)
+    module.app.query_recently_validated_final_collection_table = lambda **kwargs: []
+    module.perf_metrics.emit_event = lambda **kwargs: None
+    forwarded = []
+    module.task_message_to_master = lambda message: forwarded.append(message)
+
+    module.task_resend_validated_to_master(7)
+
+    assert forwarded == []
 
 
 def test_task_update_validated_records_forwards_successes(monkeypatch, base_fake_config, dummy_logger):

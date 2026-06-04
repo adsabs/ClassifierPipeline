@@ -1,6 +1,7 @@
 import importlib
 import json
 import types
+from datetime import datetime, timedelta, timezone
 
 
 class FakeQuery:
@@ -270,8 +271,10 @@ def test_index_record_classify_path_updates_collection_field_not_final_collectio
 
 def test_index_record_validation_path_inserts_override_and_updates_records(monkeypatch, base_fake_config, dummy_logger):
     module = _import_app_module(monkeypatch, base_fake_config, dummy_logger)
+    now = datetime(2026, 6, 4, tzinfo=timezone.utc)
+    monkeypatch.setattr(module, "get_date", lambda: now)
     score_row = types.SimpleNamespace(overrides_id=None)
-    final_row = types.SimpleNamespace(collection=None, validated=False)
+    final_row = types.SimpleNamespace(collection=None, validated=False, validated_at=None)
     queries = [
         FakeQuery(first_result=None),  # existing override
         FakeQuery(all_result=[score_row]),  # scores
@@ -285,12 +288,15 @@ def test_index_record_validation_path_inserts_override_and_updates_records(monke
     assert score_row.overrides_id == 1
     assert final_row.collection == ["Astronomy"]
     assert final_row.validated is True
+    assert final_row.validated_at == now
     assert session.commit_count == 1
 
 
 def test_index_record_validation_path_marks_unvalidated_without_override(monkeypatch, base_fake_config, dummy_logger):
     module = _import_app_module(monkeypatch, base_fake_config, dummy_logger)
-    false_row = types.SimpleNamespace(validated=False)
+    now = datetime(2026, 6, 4, tzinfo=timezone.utc)
+    monkeypatch.setattr(module, "get_date", lambda: now)
+    false_row = types.SimpleNamespace(validated=False, validated_at=None)
     true_row = None
     queries = [
         FakeQuery(first_result=None),
@@ -303,7 +309,33 @@ def test_index_record_validation_path_marks_unvalidated_without_override(monkeyp
     _, status = app.index_record(record)
     assert status == "record_validated"
     assert false_row.validated is True
+    assert false_row.validated_at == now
     assert session.commit_count == 1
+
+
+def test_set_final_collection_validation_preserves_existing_validated_at(monkeypatch, base_fake_config, dummy_logger):
+    module = _import_app_module(monkeypatch, base_fake_config, dummy_logger)
+    now = datetime(2026, 6, 4, tzinfo=timezone.utc)
+    original = now - timedelta(days=2)
+    monkeypatch.setattr(module, "get_date", lambda: now)
+    app = _new_app(module, FakeSession())
+    row = types.SimpleNamespace(validated=True, validated_at=original)
+
+    app._set_final_collection_validation(row, True)
+
+    assert row.validated is True
+    assert row.validated_at == original
+
+
+def test_set_final_collection_validation_clears_validated_at_when_unvalidated(monkeypatch, base_fake_config, dummy_logger):
+    module = _import_app_module(monkeypatch, base_fake_config, dummy_logger)
+    app = _new_app(module, FakeSession())
+    row = types.SimpleNamespace(validated=True, validated_at=datetime(2026, 6, 4, tzinfo=timezone.utc))
+
+    app._set_final_collection_validation(row, False)
+
+    assert row.validated is False
+    assert row.validated_at is None
 
 
 def test_index_record_validation_path_returns_previously_validated(monkeypatch, base_fake_config, dummy_logger):
@@ -521,9 +553,51 @@ def test_query_final_collection_table_by_scix_id(monkeypatch, base_fake_config, 
     assert app.query_final_collection_table(scix_id="S") == [{"bibcode": "B", "scix_id": "S", "collections": ["Astronomy"]}]
 
 
+def test_query_recently_validated_final_collection_table_dedupes_newest_rows(monkeypatch, base_fake_config, dummy_logger):
+    module = _import_app_module(monkeypatch, base_fake_config, dummy_logger)
+    now = datetime(2026, 6, 4, tzinfo=timezone.utc)
+    monkeypatch.setattr(module, "get_date", lambda: now)
+    queries = [
+        FakeQuery(
+            all_result=[
+                types.SimpleNamespace(
+                    bibcode="B1",
+                    scix_id=None,
+                    collection=["Astronomy"],
+                    validated=True,
+                    validated_at=now,
+                ),
+                types.SimpleNamespace(
+                    bibcode="B1",
+                    scix_id=None,
+                    collection=["Physics"],
+                    validated=True,
+                    validated_at=now - timedelta(days=1),
+                ),
+                types.SimpleNamespace(
+                    bibcode="B2",
+                    scix_id="S2",
+                    collection=["Earth Science"],
+                    validated=True,
+                    validated_at=now,
+                ),
+            ]
+        ),
+    ]
+    session = FakeSession(queries)
+    app = _new_app(module, session)
+
+    assert app.query_recently_validated_final_collection_table(days=3) == [
+        {"bibcode": "B1", "scix_id": None, "collections": ["Astronomy"]},
+        {"bibcode": "B2", "scix_id": "S2", "collections": ["Earth Science"]},
+    ]
+
+
 def test_update_validated_records_marks_records(monkeypatch, base_fake_config, dummy_logger):
     module = _import_app_module(monkeypatch, base_fake_config, dummy_logger)
-    pending = types.SimpleNamespace(validated=False)
+    now = datetime(2026, 6, 4, tzinfo=timezone.utc)
+    monkeypatch.setattr(module, "get_date", lambda: now)
+    pending = types.SimpleNamespace(validated=False, validated_at=None)
     queries = [FakeQuery(first_result=pending)]
     session = FakeSession(queries)
     app = _new_app(module, session)
@@ -532,3 +606,4 @@ def test_update_validated_records_marks_records(monkeypatch, base_fake_config, d
     assert records == [{"bibcode": "B", "scix_id": "S", "collections": ["Astronomy"]}]
     assert successes == ["success"]
     assert pending.validated is True
+    assert pending.validated_at == now

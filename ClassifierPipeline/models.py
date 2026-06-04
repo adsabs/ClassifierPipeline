@@ -56,6 +56,7 @@ class FinalCollectionTable(Base):
         Index('ix_final_collection_bibcode', 'bibcode'),
         Index('ix_final_collection_scix_id', 'scix_id'),
         Index('ix_final_collection_validated_created', 'validated', 'created'),
+        Index('ix_final_collection_validated_validated_at', 'validated', 'validated_at'),
         Index('ix_final_collection_bibcode_created', 'bibcode', 'created'),
         Index('ix_final_collection_scix_id_created', 'scix_id', 'created'),
     )
@@ -65,6 +66,7 @@ class FinalCollectionTable(Base):
     score_id = Column(Integer, ForeignKey('scores.id'))
     collection = Column(ARRAY(String))
     validated = Column(Boolean, default=False)
+    validated_at = Column(UTCDateTime)
     created = Column(UTCDateTime, default=get_date)
 
 class RunTable(Base):

@@ -30,6 +30,11 @@ def test_final_collection_table_has_priority4_indexes():
         "ix_final_collection_bibcode",
         "ix_final_collection_scix_id",
         "ix_final_collection_validated_created",
+        "ix_final_collection_validated_validated_at",
         "ix_final_collection_bibcode_created",
         "ix_final_collection_scix_id_created",
     }
+
+
+def test_final_collection_table_has_validated_at_column():
+    assert "validated_at" in models.FinalCollectionTable.__table__.columns

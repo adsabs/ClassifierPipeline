@@ -12,6 +12,7 @@ def _import_run_module(monkeypatch, dummy_logger):
     fake_tasks.task_update_validated_records = lambda message: None
     fake_tasks.task_index_classified_record = lambda message: None
     fake_tasks.task_resend_to_master = lambda message: None
+    fake_tasks.task_resend_validated_to_master = lambda days: None
     fake_tasks.prepare_pre_ingest_run = lambda filename, proj_home_path=None: (123, f"/prepared/{filename or 'pre-ingest'}_123_classified.tsv")
 
     fake_utils = types.ModuleType("ClassifierPipeline.utilities")
@@ -358,6 +359,46 @@ def test_main_rejects_delimiter_without_pre_ingest(monkeypatch, dummy_logger, ca
 
     captured = capsys.readouterr()
     assert "`--delimiter` is only supported with `--pre-ingest`." in captured.err
+
+
+def test_main_routes_resend_validated_days(monkeypatch, dummy_logger):
+    module = _import_run_module(monkeypatch, dummy_logger)
+    captured = []
+    module.task_resend_validated_to_master = lambda days: captured.append(days)
+
+    module.main(["--resend", "--validated", "--days", "3"])
+
+    assert captured == [3]
+
+
+def test_main_rejects_resend_validated_without_days(monkeypatch, dummy_logger, capsys):
+    module = _import_run_module(monkeypatch, dummy_logger)
+
+    with pytest.raises(SystemExit):
+        module.main(["--resend", "--validated"])
+
+    captured = capsys.readouterr()
+    assert "`--resend --validated` requires `--days`." in captured.err
+
+
+def test_main_rejects_days_without_resend_validated(monkeypatch, dummy_logger, capsys):
+    module = _import_run_module(monkeypatch, dummy_logger)
+
+    with pytest.raises(SystemExit):
+        module.main(["--resend", "--bibcode", "2022Natur.608Q.472D", "--days", "3"])
+
+    captured = capsys.readouterr()
+    assert "`--days` is only supported with `--resend --validated`." in captured.err
+
+
+def test_main_rejects_resend_without_selector(monkeypatch, dummy_logger, capsys):
+    module = _import_run_module(monkeypatch, dummy_logger)
+
+    with pytest.raises(SystemExit):
+        module.main(["--resend"])
+
+    captured = capsys.readouterr()
+    assert "`--resend` requires exactly one" in captured.err
 
 
 def test_main_rejects_unsupported_delimiter_value(monkeypatch, dummy_logger, tmp_path, capsys):

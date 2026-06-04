@@ -30,6 +30,9 @@ python run.py -s -x scix:abcd-1234-ef56
 # Resend all records by run_id
 python run.py -s -i 2024-08-01T12:00:00Z
 
+# Resend records validated in the last 7 days
+python run.py -s --validated -d 7
+
 Input formats
 -------------
 New records CSV (-n):
@@ -72,6 +75,7 @@ from ClassifierPipeline.tasks import (
     task_update_validated_records,
     task_index_classified_record,
     task_resend_to_master,
+    task_resend_validated_to_master,
 )
 import ClassifierPipeline.utilities as utils
 
@@ -519,6 +523,17 @@ def build_parser():
                         action='store_true',
                         help='Resend results to Master Pipeline')
 
+    parser.add_argument('--validated',
+                        dest='validated',
+                        action='store_true',
+                        help='With --resend, resend records validated in the last N days')
+
+    parser.add_argument('-d',
+                        '--days',
+                        dest='days',
+                        type=positive_int,
+                        help='Number of days to look back for --resend --validated')
+
     parser.add_argument('-b',
                         '--bibcode',
                         dest='bibcode',
@@ -556,6 +571,16 @@ def _validate_args(parser, args):
         uses_file_ingest = bool(args.new_records) or (args.pre_ingest and bool(args.records))
         if not uses_file_ingest:
             parser.error('`--file-ingest-batch-size` is only supported with `--new_records` or `--pre-ingest --records`.')
+    resend_selectors = [args.bibcode, args.scix_id, args.run_id, args.validated]
+    selected_resend_count = sum(bool(selector) for selector in resend_selectors)
+    if args.resend and selected_resend_count != 1:
+        parser.error('`--resend` requires exactly one of `--bibcode`, `--scix_id`, `--run_id`, or `--validated`.')
+    if not args.resend and (args.validated or args.days is not None):
+        parser.error('`--validated` and `--days` are only supported with `--resend`.')
+    if args.validated and args.days is None:
+        parser.error('`--resend --validated` requires `--days`.')
+    if args.days is not None and not args.validated:
+        parser.error('`--days` is only supported with `--resend --validated`.')
     if args.delimiter:
         try:
             normalize_pre_ingest_delimiter(args.delimiter)
@@ -600,18 +625,22 @@ def main(argv=None):
 
     if args.resend:
 
-        if args.bibcode:
+        if args.validated:
+            print(f'Resending records validated in the last {args.days} days')
+            task_resend_validated_to_master(args.days)
+        elif args.bibcode:
             print(f'Resending bibcode {args.bibcode}')
             record = {'bibcode' : args.bibcode}
-        if args.scix_id:
+        elif args.scix_id:
             print(f'Resending scix_id {args.scix_id}')
             record = {'scix_id' : args.scix_id}
-        if args.run_id:
+        elif args.run_id:
             print(f'Resending run_id {args.run_id}')
             record = {'run_id' : args.run_id}
 
-        message = utils.list_to_ClassifyRequestRecordList([record])
-        task_resend_to_master(message)
+        if not args.validated:
+            message = utils.list_to_ClassifyRequestRecordList([record])
+            task_resend_to_master(message)
 
     if args.test:
         logger.debug("Running tests")

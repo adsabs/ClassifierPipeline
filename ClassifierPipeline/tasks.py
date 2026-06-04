@@ -28,6 +28,7 @@ Tasks:
     - task_index_classified_record
     - task_message_to_master
     - task_resend_to_master
+    - task_resend_validated_to_master
     - task_update_validated_records
     - task_output_results
 """
@@ -795,6 +796,31 @@ def task_resend_to_master(message):
                     record_id = record['bibcode']
                 logger.info(f"Sending record {record_id} to master")
                 task_message_to_master(record)
+
+
+@app.task(queue="send-record-to-master")
+def task_resend_validated_to_master(days):
+    """
+    Re-send records validated in the last N days to Master Pipeline.
+
+    Parameters:
+        days (int): Positive number of days to look back from current UTC time
+    """
+    with perf_metrics.timed_profile(
+        category="task_timing",
+        name="task_resend_validated_to_master",
+        run_id=None,
+        context_id=None,
+        record_id=None,
+        extra={"days": days},
+        config=config,
+    ):
+        logger.info(f"Resending records validated in the last {days} days to master")
+        record_list = app.query_recently_validated_final_collection_table(days=days)
+        for record in record_list:
+            record_id = _record_identifier(record)
+            logger.info(f"Sending record {record_id} to master")
+            task_message_to_master(record)
 
 
 # @app.task(queue="classify-record")
