@@ -91,6 +91,16 @@ logger = setup_logging('run.py', proj_home=proj_home,
 
 # =============================== FUNCTIONS ======================================= #
 
+def get_file_ingest_batch_size(default=500):
+    try:
+        value = int(config.get("FILE_INGEST_BATCH_SIZE", default) or default)
+        if value > 0:
+            return value
+    except (TypeError, ValueError):
+        pass
+    return default
+
+
 def row_to_dictionary(row):
     """
     Convert a single CSV row into a minimal request dictionary.
@@ -549,12 +559,17 @@ def main(argv=None):
 
     if args.new_records:
         print("Processing new records")
-        batch_new_records(records_path)
+        batch_new_records(records_path, batch_size=get_file_ingest_batch_size())
 
     if args.pre_ingest:
         print("Processing pre-ingest records")
         if args.records:
-            batch_pre_ingest_records(records_path, output_prefix=args.output_prefix, delimiter=args.delimiter)
+            batch_pre_ingest_records(
+                records_path,
+                batch_size=get_file_ingest_batch_size(),
+                output_prefix=args.output_prefix,
+                delimiter=args.delimiter,
+            )
         else:
             queue_pre_ingest_input_text(args.input_text, output_prefix=args.output_prefix)
 

@@ -420,6 +420,32 @@ def test_main_routes_records_through_pre_ingest_with_override(monkeypatch, dummy
     assert captured == [(str(records), 500, "custom-prefix", None)]
 
 
+def test_main_routes_records_through_pre_ingest_with_configured_batch_size(monkeypatch, dummy_logger, tmp_path):
+    module = _import_run_module(monkeypatch, dummy_logger)
+    module.config["FILE_INGEST_BATCH_SIZE"] = 250
+    records = tmp_path / "pre.tsv"
+    records.write_text("title\tabstract\n")
+    captured = []
+    module.batch_pre_ingest_records = lambda records_path, batch_size=500, output_prefix=None, delimiter=None: captured.append((records_path, batch_size, output_prefix, delimiter))
+
+    module.main(["--pre-ingest", "--records", str(records)])
+
+    assert captured == [(str(records), 250, None, None)]
+
+
+def test_main_routes_new_records_with_configured_batch_size(monkeypatch, dummy_logger, tmp_path):
+    module = _import_run_module(monkeypatch, dummy_logger)
+    module.config["FILE_INGEST_BATCH_SIZE"] = 250
+    records = tmp_path / "new.csv"
+    records.write_text("bibcode,title,abstract\n")
+    captured = []
+    module.batch_new_records = lambda records_path, batch_size=500: captured.append((records_path, batch_size))
+
+    module.main(["--new_records", "--records", str(records)])
+
+    assert captured == [(str(records), 250)]
+
+
 def test_main_routes_records_through_pre_ingest_with_delimiter(monkeypatch, dummy_logger, tmp_path):
     module = _import_run_module(monkeypatch, dummy_logger)
     records = tmp_path / "pre.txt"
@@ -430,3 +456,16 @@ def test_main_routes_records_through_pre_ingest_with_delimiter(monkeypatch, dumm
     module.main(["--pre-ingest", "--records", str(records), "--delimiter", "csv"])
 
     assert captured == [(str(records), 500, None, "csv")]
+
+
+def test_get_file_ingest_batch_size_rejects_invalid_config(monkeypatch, dummy_logger):
+    module = _import_run_module(monkeypatch, dummy_logger)
+
+    module.config["FILE_INGEST_BATCH_SIZE"] = 0
+    assert module.get_file_ingest_batch_size() == 500
+
+    module.config["FILE_INGEST_BATCH_SIZE"] = -1
+    assert module.get_file_ingest_batch_size() == 500
+
+    module.config["FILE_INGEST_BATCH_SIZE"] = "bad"
+    assert module.get_file_ingest_batch_size() == 500
