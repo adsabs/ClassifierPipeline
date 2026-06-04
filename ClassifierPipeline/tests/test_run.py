@@ -433,6 +433,19 @@ def test_main_routes_records_through_pre_ingest_with_configured_batch_size(monke
     assert captured == [(str(records), 250, None, None)]
 
 
+def test_main_routes_records_through_pre_ingest_with_cli_batch_size(monkeypatch, dummy_logger, tmp_path):
+    module = _import_run_module(monkeypatch, dummy_logger)
+    module.config["FILE_INGEST_BATCH_SIZE"] = 250
+    records = tmp_path / "pre.tsv"
+    records.write_text("title\tabstract\n")
+    captured = []
+    module.batch_pre_ingest_records = lambda records_path, batch_size=500, output_prefix=None, delimiter=None: captured.append((records_path, batch_size, output_prefix, delimiter))
+
+    module.main(["--pre-ingest", "--records", str(records), "--file-ingest-batch-size", "125"])
+
+    assert captured == [(str(records), 125, None, None)]
+
+
 def test_main_routes_new_records_with_configured_batch_size(monkeypatch, dummy_logger, tmp_path):
     module = _import_run_module(monkeypatch, dummy_logger)
     module.config["FILE_INGEST_BATCH_SIZE"] = 250
@@ -444,6 +457,19 @@ def test_main_routes_new_records_with_configured_batch_size(monkeypatch, dummy_l
     module.main(["--new_records", "--records", str(records)])
 
     assert captured == [(str(records), 250)]
+
+
+def test_main_routes_new_records_with_cli_batch_size(monkeypatch, dummy_logger, tmp_path):
+    module = _import_run_module(monkeypatch, dummy_logger)
+    module.config["FILE_INGEST_BATCH_SIZE"] = 250
+    records = tmp_path / "new.csv"
+    records.write_text("bibcode,title,abstract\n")
+    captured = []
+    module.batch_new_records = lambda records_path, batch_size=500: captured.append((records_path, batch_size))
+
+    module.main(["--new_records", "--records", str(records), "--file-ingest-batch-size", "125"])
+
+    assert captured == [(str(records), 125)]
 
 
 def test_main_routes_records_through_pre_ingest_with_delimiter(monkeypatch, dummy_logger, tmp_path):
@@ -469,3 +495,25 @@ def test_get_file_ingest_batch_size_rejects_invalid_config(monkeypatch, dummy_lo
 
     module.config["FILE_INGEST_BATCH_SIZE"] = "bad"
     assert module.get_file_ingest_batch_size() == 500
+
+
+def test_main_rejects_invalid_file_ingest_batch_size(monkeypatch, dummy_logger, tmp_path):
+    module = _import_run_module(monkeypatch, dummy_logger)
+    records = tmp_path / "pre.tsv"
+    records.write_text("title\tabstract\n")
+
+    with pytest.raises(SystemExit):
+        module.main(["--pre-ingest", "--records", str(records), "--file-ingest-batch-size", "0"])
+
+    with pytest.raises(SystemExit):
+        module.main(["--pre-ingest", "--records", str(records), "--file-ingest-batch-size", "-1"])
+
+    with pytest.raises(SystemExit):
+        module.main(["--pre-ingest", "--records", str(records), "--file-ingest-batch-size", "bad"])
+
+
+def test_main_rejects_file_ingest_batch_size_with_input_text(monkeypatch, dummy_logger):
+    module = _import_run_module(monkeypatch, dummy_logger)
+
+    with pytest.raises(SystemExit):
+        module.main(["--pre-ingest", "--input-text", "sample body", "--file-ingest-batch-size", "125"])

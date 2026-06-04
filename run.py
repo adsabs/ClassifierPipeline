@@ -91,7 +91,19 @@ logger = setup_logging('run.py', proj_home=proj_home,
 
 # =============================== FUNCTIONS ======================================= #
 
-def get_file_ingest_batch_size(default=500):
+def positive_int(value):
+    try:
+        parsed_value = int(value)
+    except (TypeError, ValueError):
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    if parsed_value <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed_value
+
+
+def get_file_ingest_batch_size(override=None, default=500):
+    if override is not None:
+        return override
     try:
         value = int(config.get("FILE_INGEST_BATCH_SIZE", default) or default)
         if value > 0:
@@ -490,6 +502,11 @@ def build_parser():
                         action='store',
                         help='Override the output TSV filename prefix for pre-ingest runs')
 
+    parser.add_argument('--file-ingest-batch-size',
+                        dest='file_ingest_batch_size',
+                        type=positive_int,
+                        help='Override FILE_INGEST_BATCH_SIZE for file-based new-record and pre-ingest runs')
+
     parser.add_argument('-t',
                         '--test',
                         dest='test',
@@ -535,6 +552,10 @@ def _validate_args(parser, args):
         parser.error('`--delimiter` is only supported with `--pre-ingest`.')
     if args.delimiter and args.input_text:
         parser.error('`--delimiter` is only supported with `--records` in `--pre-ingest` mode.')
+    if args.file_ingest_batch_size is not None:
+        uses_file_ingest = bool(args.new_records) or (args.pre_ingest and bool(args.records))
+        if not uses_file_ingest:
+            parser.error('`--file-ingest-batch-size` is only supported with `--new_records` or `--pre-ingest --records`.')
     if args.delimiter:
         try:
             normalize_pre_ingest_delimiter(args.delimiter)
@@ -559,14 +580,14 @@ def main(argv=None):
 
     if args.new_records:
         print("Processing new records")
-        batch_new_records(records_path, batch_size=get_file_ingest_batch_size())
+        batch_new_records(records_path, batch_size=get_file_ingest_batch_size(args.file_ingest_batch_size))
 
     if args.pre_ingest:
         print("Processing pre-ingest records")
         if args.records:
             batch_pre_ingest_records(
                 records_path,
-                batch_size=get_file_ingest_batch_size(),
+                batch_size=get_file_ingest_batch_size(args.file_ingest_batch_size),
                 output_prefix=args.output_prefix,
                 delimiter=args.delimiter,
             )
