@@ -25,6 +25,7 @@ import pickle
 import zlib
 import csv
 import re
+import atexit
 
 from google.protobuf.json_format import Parse, MessageToDict, ParseDict
 from adsmsg import ClassifyRequestRecord, ClassifyRequestRecordList, ClassifyResponseRecord, ClassifyResponseRecordList
@@ -39,6 +40,10 @@ config = load_config(proj_home=proj_home)
 logger = setup_logging('utilities.py', proj_home=proj_home,
                         level=config.get('LOGGING_LEVEL', 'INFO'),
                         attach_stdout=config.get('LOG_STDOUT', True))
+
+_OUTPUT_ROW_BUFFERS = {}
+_OUTPUT_BUFFER_FLUSH_EVERY = 25
+_OUTPUT_FLUSH_REGISTERED = False
 
 
 def classify_record_from_scores(record):
@@ -66,11 +71,11 @@ def classify_record_from_scores(record):
         - collections (list of str): Categories meeting threshold.
         - collection_scores (list of float): Rounded scores for included collections.
     """
-    logger.info('Classify Record From Scores')
-    logger.info('RECORD: {}'.format(record))
+    logger.debug('Classify Record From Scores')
+    logger.debug('RECORD: {}'.format(record))
     # Fetch thresholds from config file
     thresholds = config['CLASSIFICATION_THRESHOLDS']
-    logger.info(f'Classification Thresholds: {thresholds}')
+    logger.debug(f'Classification Thresholds: {thresholds}')
 
 
     scores = record['scores']
@@ -81,7 +86,7 @@ def classify_record_from_scores(record):
     # Extra step to check for "Earth Science" articles miscategorized as "Other"
     # This is expected to be less neccessary with improved training data
     if config['ADDITIONAL_EARTH_SCIENCE_PROCESSING'] == 'active':
-        logger.info('Additional Earth Science Processing')
+        logger.debug('Additional Earth Science Processing')
         if meet_threshold[categories.index('Other')] is True:
             # If Earth Science score above additional threshold
             if scores[categories.index('Earth Science')] \
@@ -112,13 +117,37 @@ def prepare_output_file(output_path):
     Overwrites existing files with the same name.
     """
     logger.info('Preparing output file - utilities.py')
+    global _OUTPUT_FLUSH_REGISTERED
 
     header = ['bibcode','scix_id','run_id','title','collections','collection_scores','astronomy_score','heliophysics_score','planetary_science_score','earth_science_score','biology_score','physics_score','other_score','garbage_score','override']
 
     with open(output_path, 'w', newline='') as file:
         writer = csv.writer(file, delimiter='\t')
         writer.writerow(header)
+    _OUTPUT_ROW_BUFFERS.pop(output_path, None)
+    if not _OUTPUT_FLUSH_REGISTERED:
+        atexit.register(flush_output_file)
+        _OUTPUT_FLUSH_REGISTERED = True
     logger.info(f'Prepared {output_path} for writing.')
+
+
+def flush_output_file(output_path=None):
+    if output_path is not None:
+        buffered_rows = _OUTPUT_ROW_BUFFERS.get(output_path, [])
+        if not buffered_rows:
+            return
+        with open(output_path, 'a', newline='') as file:
+            writer = csv.writer(file, delimiter='\t')
+            writer.writerows(buffered_rows)
+        _OUTPUT_ROW_BUFFERS[output_path] = []
+        return
+
+    for path in list(_OUTPUT_ROW_BUFFERS.keys()):
+        flush_output_file(path)
+
+
+def reset_output_buffers_for_tests():
+    _OUTPUT_ROW_BUFFERS.clear()
 
 def add_record_to_output_file(record):
     """
@@ -144,9 +173,10 @@ def add_record_to_output_file(record):
     row = [record['bibcode'], record['scix_id'],record['run_id'],record['title'],', '.join(record['collections']), ', '.join(map(str, record['collection_scores'])), round(record['scores'][0],2), round(record['scores'][1],2), round(record['scores'][2],2), round(record['scores'][3],2), round(record['scores'][4],2), round(record['scores'][5],2), round(record['scores'][6],2), round(record['scores'][7],2), '']
 
     logger.debug(f'Writing {row}')
-    with open(record['output_path'], 'a', newline='') as file:
-        writer = csv.writer(file, delimiter='\t')
-        writer.writerow(row)
+    output_path = record['output_path']
+    _OUTPUT_ROW_BUFFERS.setdefault(output_path, []).append(row)
+    if len(_OUTPUT_ROW_BUFFERS[output_path]) >= _OUTPUT_BUFFER_FLUSH_EVERY:
+        flush_output_file(output_path)
 
 
 def check_is_allowed_category(categories_list):
@@ -163,7 +193,7 @@ def check_is_allowed_category(categories_list):
     bool
         True if all categories are allowed, False otherwise.
     """
-    logger.info(f"Cheking allowed categories for {categories_list}")
+    logger.debug(f"Cheking allowed categories for {categories_list}")
     allowed = config.get('ALLOWED_CATEGORIES')
     allowed = [s.lower() for s in allowed]
 
@@ -171,7 +201,7 @@ def check_is_allowed_category(categories_list):
 
     result = [element in allowed for element in categories_list]
 
-    logger.info(f"Checking allowed categories for (after lowercase) {categories_list}")
+    logger.debug(f"Checking allowed categories for (after lowercase) {categories_list}")
     # Only return True if all True
     if sum(result) == len(result):
         return True
@@ -211,7 +241,7 @@ def return_fake_data(record):
     """
 
     
-    logger.info('Retruning Fake data')
+    logger.debug('Retruning Fake data')
 
     record['categories'] = ["Astronomy", "Heliophysics", "Planetary Science", "Earth Science", "NASA-funded Biophysics", "Other Physics", "Other", "Text Garbage"]
     record['scores'] = [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]
@@ -295,7 +325,7 @@ def list_to_ClassifyRequestRecordList(input_list):
 
     input_list = list(map(lambda d: filter_allowed_fields(d), input_list))
 
-    logger.info(f'Created ClassifyResponseRecord message from list: {input_list}')
+    logger.debug(f'Created ClassifyResponseRecord message from list: {input_list}')
 
     request_list_dict = {
             'classify_requests' : input_list,
@@ -349,7 +379,7 @@ def list_to_ClassifyResponseRecordList(input_list):
             # 'status' : 99
             }
 
-    logger.info(f"Dictionary for Response Message {response_list_dict}")
+    logger.debug(f"Dictionary for Response Message {response_list_dict}")
     response_message = ClassifyResponseRecordList()
     message = ParseDict(response_list_dict, response_message)
     return message
@@ -370,14 +400,14 @@ def classifyRequestRecordList_to_list(message):
         List of request dictionaries.
     """
 
-    logger.info(f'Converting message to list: {message}')
+    logger.debug(f'Converting message to list: {message}')
     output_list = []
     request_list = message.classify_requests
     for request in request_list:
-        logger.info(f'Unpacking request: {request}')
+        logger.debug(f'Unpacking request: {request}')
         output_list.append(MessageToDict(request,preserving_proto_field_name=True))
 
-    logger.info(f'Output list from message: {output_list}')
+    logger.debug(f'Output list from message: {output_list}')
 
     return output_list
 
@@ -408,6 +438,5 @@ def check_identifier(identifier):
         return 'scix_id'
     else:
         return 'bibcode'
-
 
 

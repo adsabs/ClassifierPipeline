@@ -41,8 +41,8 @@ def harvest_solr(bibcodes_list, start_index=0, fields='bibcode, title, abstract'
     step_size = 2000
     # step_size = 20
 
-    # json dict to dump
-    dataset = {}
+    harvested_records = []
+    batch_failures = []
 
     logger.info('Start of harvest')
     #start progress bar
@@ -60,6 +60,7 @@ def harvest_solr(bibcodes_list, start_index=0, fields='bibcode, title, abstract'
         # limit attempts to 10
         attempts = 0
         successful_req = False
+        last_error = None
 
         # extract next step_size list
         input_bibcodes = bibcodes_list[idx:idx+step_size]
@@ -68,18 +69,47 @@ def harvest_solr(bibcodes_list, start_index=0, fields='bibcode, title, abstract'
         # start attempts
         while (not successful_req) and (attempts<10):
             r_json = None
-            r = requests.post(solr_config['API_URL']+'/search/bigquery',
-                    params={'q':'*:*', 'wt':'json', 'fq':'{!bitset}', 'fl':fields, 'rows':len(input_bibcodes)},
-                              headers={'Authorization': 'Bearer ' + solr_config['API_TOKEN'], "Content-Type": "big-query/csv"},
-                              data=bibcodes)
+            try:
+                r = requests.post(
+                    solr_config['API_URL'] + '/search/bigquery',
+                    params={'q': '*:*', 'wt': 'json', 'fq': '{!bitset}', 'fl': fields, 'rows': len(input_bibcodes)},
+                    headers={'Authorization': 'Bearer ' + solr_config['API_TOKEN'], "Content-Type": "big-query/csv"},
+                    data=bibcodes,
+                    timeout=60,
+                )
+            except requests.RequestException as exc:
+                last_error = 'REQUEST {} FAILED WITH EXCEPTION: {}'.format(attempts, exc)
+                to_log += last_error + '\n'
+                attempts += 1
+                continue
 
             # check that request worked
             # proceed if r.status_code == 200
             # if fails, log r.text, then repeat for x tries
             if r.status_code==200:
-                successful_req=True
+                try:
+                    r_json = r.json()
+                except ValueError as exc:
+                    last_error = 'REQUEST {} RETURNED INVALID JSON: {}'.format(attempts, exc)
+                    to_log += last_error + '\n'
+                    to_log += str(r.text) + '\n'
+                    attempts += 1
+                    continue
+
+                docs = ((r_json.get('response') or {}).get('docs')) if isinstance(r_json, dict) else None
+                if docs is None:
+                    last_error = 'REQUEST {} RETURNED NO response.docs FIELD'.format(attempts)
+                    to_log += last_error + '\n'
+                    to_log += json.dumps(r_json)[:2000] + '\n'
+                elif len(docs) == 0:
+                    last_error = 'REQUEST {} RETURNED ZERO DOCS'.format(attempts)
+                    to_log += last_error + '\n'
+                    to_log += json.dumps(r_json)[:2000] + '\n'
+                else:
+                    successful_req=True
             else:
-                to_log += 'REQUEST {} FAILED: CODE {}\n'.format(attempts, r.status_code)
+                last_error = 'REQUEST {} FAILED: CODE {}'.format(attempts, r.status_code)
+                to_log += last_error + '\n'
                 to_log += str(r.text)+'\n'
 
             # inc count
@@ -89,6 +119,7 @@ def harvest_solr(bibcodes_list, start_index=0, fields='bibcode, title, abstract'
         if successful_req:
             #extract json
             r_json = r.json()
+            harvested_records.extend(transform_r_json(r_json))
 
             # add to stat counts
             # astronomy_count += len(r_json['response']['docs'])
@@ -102,6 +133,11 @@ def harvest_solr(bibcodes_list, start_index=0, fields='bibcode, title, abstract'
         else:
             # add to log
             to_log += 'FAILING BIBCODES: {}\n'.format(input_bibcodes)
+            batch_failures.append({
+                'start_index': idx,
+                'count': len(input_bibcodes),
+                'last_error': last_error,
+            })
 
 #             # raise error
 #             r.raise_for_status()
@@ -142,18 +178,49 @@ def harvest_solr(bibcodes_list, start_index=0, fields='bibcode, title, abstract'
     # print('checkpoint harvest_solr.py')
     # import pdb;pdb.set_trace()
 
-    return transform_r_json(r_json)
+    if batch_failures and not harvested_records:
+        failure = batch_failures[0]
+        raise RuntimeError(
+            'Harvest failed for all batches. '
+            'First failed batch start_index={} count={} error={}'.format(
+                failure['start_index'],
+                failure['count'],
+                failure['last_error'],
+            )
+        )
+
+    if batch_failures:
+        logger.warning('Harvest completed with failed batches: {}'.format(batch_failures))
+
+    if bibcodes_list and not harvested_records:
+        raise RuntimeError('Harvest completed without errors but returned zero records.')
+
+    return harvested_records
 
 
 def transform_r_json(r_json):
     """
     Extract the needed information from the json response from the solr query.
     """
+    if not r_json:
+        return []
+
+    response = r_json.get('response') or {}
+    docs = response.get('docs') or []
+    if not docs:
+        return []
 
     # extract the needed information
-    bibcodes = [doc['bibcode'] for doc in r_json['response']['docs']]
-    titles = [doc['title'][0] for doc in r_json['response']['docs']] # without [0] it returns a list
-    abstracts = [doc['abstract'] for doc in r_json['response']['docs']]
+    bibcodes = [doc.get('bibcode') for doc in docs]
+    titles = []
+    abstracts = []
+    for doc in docs:
+        title = doc.get('title') or ['']
+        if isinstance(title, list):
+            title = title[0] if title else ''
+        abstract = doc.get('abstract') or ''
+        titles.append(title)
+        abstracts.append(abstract)
 
     # list of dictionaries with the bibcode, title, and abstract for each record
     record_list = [{'bibcode': bibcodes[i],
