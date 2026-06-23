@@ -43,17 +43,7 @@ import ClassifierPipeline.app as app_module
 import ClassifierPipeline.utilities as utils
 import ClassifierPipeline.perf_metrics as perf_metrics
 from ClassifierPipeline.classifier import Classifier
-from ClassifierPipeline.pre_ingest_state import (
-    _PRE_INGEST_CLASSIFY_LEASE_SECONDS,
-    _PRE_INGEST_INDEX_LEASE_SECONDS,
-    _claim_pre_ingest_stage,
-    _connect_pre_ingest_state_db,
-    _is_pre_ingest_record,
-    _mark_pre_ingest_stage,
-    _normalize_pre_ingest_identity_value,
-    _pre_ingest_fingerprint,
-    _pre_ingest_state_db_path,
-)
+import ClassifierPipeline.pre_ingest_state as pre_ingest_state
 from adsputils import load_config, setup_logging
 from kombu import Queue
 from google.protobuf.json_format import Parse, MessageToDict
@@ -335,10 +325,10 @@ def task_send_input_record_to_classifier(message):
 
         claimed_records = []
         for index, record in enumerate(records):
-            if _claim_pre_ingest_stage(
+            if pre_ingest_state._claim_pre_ingest_stage(
                 record,
                 "classify_inflight",
-                _PRE_INGEST_CLASSIFY_LEASE_SECONDS,
+                pre_ingest_state._PRE_INGEST_CLASSIFY_LEASE_SECONDS,
             ):
                 claimed_records.append(record)
 
@@ -433,7 +423,7 @@ def task_send_input_record_to_classifier(message):
         logger.debug("Record Type: {}".format(type(processed_records)))
 
         for record in processed_records:
-            _mark_pre_ingest_stage(record, "classify_done")
+            pre_ingest_state._mark_pre_ingest_stage(record, "classify_done")
 
         out_message = utils.list_to_ClassifyRequestRecordList(processed_records)
 
@@ -486,10 +476,10 @@ def task_index_classified_record(message):
         elif records and all(record.get("operation_step") == "pre_ingest" for record in records):
             claimed_specs = []
             for index, record in enumerate(records):
-                if _claim_pre_ingest_stage(
+                if pre_ingest_state._claim_pre_ingest_stage(
                     record,
                     "index_inflight",
-                    _PRE_INGEST_INDEX_LEASE_SECONDS,
+                    pre_ingest_state._PRE_INGEST_INDEX_LEASE_SECONDS,
                 ):
                     claimed_specs.append((index, record))
             indexed_specs = [(index, record) for index, record in claimed_specs if _has_identifier(record)]
@@ -535,7 +525,7 @@ def task_index_classified_record(message):
                     if record.get("output_path"):
                         touched_output_paths.add(record["output_path"])
                     if record['operation_step'] == 'pre_ingest':
-                        _mark_pre_ingest_stage(record, "indexed_done")
+                        pre_ingest_state._mark_pre_ingest_stage(record, "indexed_done")
                 if record['operation_step'] == 'classify':
                     logger.info(f"Record {record_id} indexed")
                     app.add_record_to_output_file(record)
@@ -549,7 +539,7 @@ def task_index_classified_record(message):
                 utils.add_record_to_output_file(record)
                 if record.get("output_path"):
                     touched_output_paths.add(record["output_path"])
-                _mark_pre_ingest_stage(record, "indexed_done")
+                pre_ingest_state._mark_pre_ingest_stage(record, "indexed_done")
 
             elif success == "record_validated":
                 resend_message = utils.list_to_ClassifyRequestRecordList([record])

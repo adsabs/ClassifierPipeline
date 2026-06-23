@@ -348,8 +348,8 @@ def test_pre_ingest_fingerprint_normalizes_whitespace_and_includes_run_id(monkey
     record_two = {"run_id": "R", "title": "T one", "abstract": "A two"}
     record_three = {"run_id": "R2", "title": "T one", "abstract": "A two"}
 
-    assert module._pre_ingest_fingerprint(record_one) == module._pre_ingest_fingerprint(record_two)
-    assert module._pre_ingest_fingerprint(record_one) != module._pre_ingest_fingerprint(record_three)
+    assert module.pre_ingest_state._pre_ingest_fingerprint(record_one) == module.pre_ingest_state._pre_ingest_fingerprint(record_two)
+    assert module.pre_ingest_state._pre_ingest_fingerprint(record_one) != module.pre_ingest_state._pre_ingest_fingerprint(record_three)
 
 
 def test_pre_ingest_fingerprint_prefers_bibcode_over_text(monkeypatch, base_fake_config, dummy_logger):
@@ -358,8 +358,8 @@ def test_pre_ingest_fingerprint_prefers_bibcode_over_text(monkeypatch, base_fake
     record_two = {"run_id": "R", "bibcode": "B1", "title": "Different", "abstract": "Different"}
     record_three = {"run_id": "R2", "bibcode": "B1", "title": "T one", "abstract": "A one"}
 
-    assert module._pre_ingest_fingerprint(record_one) == module._pre_ingest_fingerprint(record_two)
-    assert module._pre_ingest_fingerprint(record_one) != module._pre_ingest_fingerprint(record_three)
+    assert module.pre_ingest_state._pre_ingest_fingerprint(record_one) == module.pre_ingest_state._pre_ingest_fingerprint(record_two)
+    assert module.pre_ingest_state._pre_ingest_fingerprint(record_one) != module.pre_ingest_state._pre_ingest_fingerprint(record_three)
 
 
 def test_pre_ingest_fingerprint_prefers_scix_id_over_text(monkeypatch, base_fake_config, dummy_logger):
@@ -368,8 +368,8 @@ def test_pre_ingest_fingerprint_prefers_scix_id_over_text(monkeypatch, base_fake
     record_two = {"run_id": "R", "scix_id": "scix:1", "title": "Different", "abstract": "Different"}
     record_three = {"run_id": "R2", "scix_id": "scix:1", "title": "T one", "abstract": "A one"}
 
-    assert module._pre_ingest_fingerprint(record_one) == module._pre_ingest_fingerprint(record_two)
-    assert module._pre_ingest_fingerprint(record_one) != module._pre_ingest_fingerprint(record_three)
+    assert module.pre_ingest_state._pre_ingest_fingerprint(record_one) == module.pre_ingest_state._pre_ingest_fingerprint(record_two)
+    assert module.pre_ingest_state._pre_ingest_fingerprint(record_one) != module.pre_ingest_state._pre_ingest_fingerprint(record_three)
 
 
 def test_task_send_input_record_to_classifier_real_inference_batch(monkeypatch, base_fake_config, dummy_logger):
