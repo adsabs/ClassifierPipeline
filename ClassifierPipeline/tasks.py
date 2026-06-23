@@ -37,15 +37,23 @@ import os
 import json
 import time
 import itertools
-import hashlib
-import re
-import sqlite3
 import adsputils
 from adsputils import ADSCelery
 import ClassifierPipeline.app as app_module
 import ClassifierPipeline.utilities as utils
 import ClassifierPipeline.perf_metrics as perf_metrics
 from ClassifierPipeline.classifier import Classifier
+from ClassifierPipeline.pre_ingest_state import (
+    _PRE_INGEST_CLASSIFY_LEASE_SECONDS,
+    _PRE_INGEST_INDEX_LEASE_SECONDS,
+    _claim_pre_ingest_stage,
+    _connect_pre_ingest_state_db,
+    _is_pre_ingest_record,
+    _mark_pre_ingest_stage,
+    _normalize_pre_ingest_identity_value,
+    _pre_ingest_fingerprint,
+    _pre_ingest_state_db_path,
+)
 from adsputils import load_config, setup_logging
 from kombu import Queue
 from google.protobuf.json_format import Parse, MessageToDict
@@ -76,8 +84,6 @@ app.conf.CELERY_QUEUES = (
 classifier = Classifier()
 _UNSET = object()
 _RUN_ID_COUNTER = itertools.count()
-_PRE_INGEST_CLASSIFY_LEASE_SECONDS = 300
-_PRE_INGEST_INDEX_LEASE_SECONDS = 120
 
 
 def _record_identifier(record):
@@ -105,134 +111,6 @@ def _resolve_positive_int_config(name, default):
     except (TypeError, ValueError):
         pass
     return default
-
-
-def _is_pre_ingest_record(record):
-    return record.get("operation_step") == "pre_ingest"
-
-
-def _normalize_pre_ingest_identity_value(value):
-    return re.sub(r"\s+", " ", str(value or "").strip())
-
-
-def _pre_ingest_fingerprint(record):
-    canonical_parts = [_normalize_pre_ingest_identity_value(record.get("run_id"))]
-    if record.get("scix_id"):
-        canonical_parts.extend(
-            ["scix_id", _normalize_pre_ingest_identity_value(record.get("scix_id"))]
-        )
-    elif record.get("bibcode"):
-        canonical_parts.extend(
-            ["bibcode", _normalize_pre_ingest_identity_value(record.get("bibcode"))]
-        )
-    else:
-        canonical_parts.extend(
-            [
-                "text",
-                _normalize_pre_ingest_identity_value(record.get("title")),
-                _normalize_pre_ingest_identity_value(record.get("abstract")),
-            ]
-        )
-    canonical = "|".join(canonical_parts)
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
-
-def _pre_ingest_state_db_path(output_path):
-    return "{}.pre_ingest_state.sqlite3".format(output_path)
-
-
-def _connect_pre_ingest_state_db(output_path):
-    database_path = _pre_ingest_state_db_path(output_path)
-    connection = sqlite3.connect(database_path)
-    connection.execute(
-        """
-        CREATE TABLE IF NOT EXISTS pre_ingest_state (
-            fingerprint TEXT PRIMARY KEY,
-            stage TEXT NOT NULL,
-            lease_until REAL,
-            updated_at REAL NOT NULL
-        )
-        """
-    )
-    return connection
-
-
-def _claim_pre_ingest_stage(record, target_stage, lease_seconds, now=None):
-    if not _is_pre_ingest_record(record) or not record.get("output_path"):
-        return True
-
-    allowed_prior_stage = {
-        "classify_inflight": None,
-        "index_inflight": "classify_done",
-    }[target_stage]
-    fingerprint = _pre_ingest_fingerprint(record)
-    timestamp = time.time() if now is None else now
-    lease_until = timestamp + lease_seconds
-
-    with _connect_pre_ingest_state_db(record["output_path"]) as connection:
-        current_row = connection.execute(
-            "SELECT stage, lease_until FROM pre_ingest_state WHERE fingerprint = ?",
-            (fingerprint,),
-        ).fetchone()
-
-        if current_row is None:
-            connection.execute(
-                """
-                INSERT INTO pre_ingest_state (fingerprint, stage, lease_until, updated_at)
-                VALUES (?, ?, ?, ?)
-                """,
-                (fingerprint, target_stage, lease_until, timestamp),
-            )
-            return True
-
-        current_stage, current_lease_until = current_row
-        current_lease_until = float(current_lease_until or 0.0)
-
-        if current_stage == "indexed_done":
-            return False
-
-        if target_stage == "classify_inflight":
-            if current_stage in {"classify_done", "index_inflight"}:
-                return False
-            if current_stage == "classify_inflight" and current_lease_until > timestamp:
-                return False
-        else:
-            if current_stage == "index_inflight" and current_lease_until > timestamp:
-                return False
-            if current_stage != allowed_prior_stage and not (
-                current_stage == target_stage and current_lease_until <= timestamp
-            ):
-                return False
-
-        connection.execute(
-            """
-            UPDATE pre_ingest_state
-            SET stage = ?, lease_until = ?, updated_at = ?
-            WHERE fingerprint = ?
-            """,
-            (target_stage, lease_until, timestamp, fingerprint),
-        )
-        return True
-
-
-def _mark_pre_ingest_stage(record, stage, now=None):
-    if not _is_pre_ingest_record(record) or not record.get("output_path"):
-        return
-
-    fingerprint = _pre_ingest_fingerprint(record)
-    timestamp = time.time() if now is None else now
-    with _connect_pre_ingest_state_db(record["output_path"]) as connection:
-        connection.execute(
-            """
-            INSERT INTO pre_ingest_state (fingerprint, stage, lease_until, updated_at)
-            VALUES (?, ?, NULL, ?)
-            ON CONFLICT(fingerprint) DO UPDATE SET
-                stage = excluded.stage,
-                lease_until = NULL,
-                updated_at = excluded.updated_at
-            """,
-            (fingerprint, stage, timestamp),
-        )
 
 
 def generate_run_id(operation_step=None):
