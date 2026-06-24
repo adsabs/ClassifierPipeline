@@ -28,6 +28,7 @@ Tasks:
     - task_index_classified_record
     - task_message_to_master
     - task_resend_to_master
+    - task_resend_validated_to_master
     - task_update_validated_records
     - task_output_results
 """
@@ -35,12 +36,14 @@ import sys
 import os
 import json
 import time
+import itertools
 import adsputils
 from adsputils import ADSCelery
 import ClassifierPipeline.app as app_module
 import ClassifierPipeline.utilities as utils
 import ClassifierPipeline.perf_metrics as perf_metrics
 from ClassifierPipeline.classifier import Classifier
+import ClassifierPipeline.pre_ingest_state as pre_ingest_state
 from adsputils import load_config, setup_logging
 from kombu import Queue
 from google.protobuf.json_format import Parse, MessageToDict
@@ -69,6 +72,8 @@ app.conf.CELERY_QUEUES = (
 )
 
 classifier = Classifier()
+_UNSET = object()
+_RUN_ID_COUNTER = itertools.count()
 
 
 def _record_identifier(record):
@@ -97,6 +102,42 @@ def _resolve_positive_int_config(name, default):
         pass
     return default
 
+
+def generate_run_id(operation_step=None):
+    # `operation_step` is retained for caller compatibility; generation is the
+    # same for every non-pre-ingest path that still uses run IDs.
+    return time.time_ns() + next(_RUN_ID_COUNTER)
+
+
+def build_output_path(proj_home, operation_step, filename, run_id):
+    """
+    Build the run-scoped output path under the project logs directory.
+
+    Parameters
+    ----------
+    proj_home : str
+        Project root used as the base directory for `logs/`.
+    operation_step : str
+        Pipeline step associated with the output. All current run-based modes,
+        including `pre_ingest`, use the same filename shape.
+    filename : str
+        Output filename prefix. Falls back to ``"pre-ingest"`` when blank.
+    run_id : str | int
+        Run identifier to embed in the output filename.
+    """
+    safe_filename = filename or "pre-ingest"
+    return os.path.join(proj_home, 'logs', f'{safe_filename}_{run_id}_classified.tsv')
+
+
+def prepare_pre_ingest_run(filename, proj_home_path=_UNSET):
+    resolved_proj_home = proj_home if proj_home_path is _UNSET else proj_home_path
+    run_id = app.index_run()
+    output_path = build_output_path(resolved_proj_home, "pre_ingest", filename, run_id)
+    utils.prepare_output_file(output_path)
+    logger.info(f'Prepared pre-ingest output file: {output_path}')
+    return run_id, output_path
+
+
 # ============================= TASKS ============================================= #
 
 @app.task(queue="update-record")
@@ -117,10 +158,19 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
     logger.debug(f'Message: {message}')
 
     request_list = utils.classifyRequestRecordList_to_list(message)
+    if not request_list:
+        logger.info("No records received by task_update_record")
+        return {"run_id": None, "records_submitted": 0}
     context_id = _batch_context_id(request_list)
+    first_request = request_list[0]
 
-    if request_list and request_list[0].get("run_id"):
-        run_id = request_list[0].get("run_id")
+    if 'operation_step' in first_request:
+        operation_step = first_request['operation_step']
+    else:
+        operation_step = config.get('OPERATION_STEP', 'classify_verify')
+
+    if first_request.get("run_id") is not None:
+        run_id = first_request.get("run_id")
     else:
         run_id = app.index_run(perf_metrics_context_id=context_id)
 
@@ -135,24 +185,38 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
     ):
         logger.info('Run ID: {}'.format(run_id))
 
-        if 'operation_step' in request_list[0]:
-            operation_step = request_list[0]['operation_step']
+        should_prepare_output = True
+        ensure_output_exists = False
+        existing_output_path = first_request.get("output_path")
+        if (
+            operation_step == "pre_ingest"
+            and first_request.get("run_id") is not None
+            and existing_output_path
+            and os.path.isabs(existing_output_path)
+        ):
+            output_path = existing_output_path
+            should_prepare_output = False
+        elif operation_step == "pre_ingest" and existing_output_path and os.path.isabs(existing_output_path):
+            logger.warning(
+                "Pre-ingest message missing `run_id`; treating absolute output_path as replay target: {}".format(
+                    existing_output_path
+                )
+            )
+            output_path = existing_output_path
+            should_prepare_output = False
+            ensure_output_exists = True
         else:
-            operation_step = config.get('OPERATION_STEP', 'classify_verify')
+            filename = str(existing_output_path).split('/')[-1] if existing_output_path else ''
+            output_path = build_output_path(proj_home, operation_step, filename, run_id)
 
-        if 'output_path' in request_list[0]:
-            try:
-                filename = request_list[0]['output_path']
-                filename = filename.split('/')[-1]
-            except:
-                filename = request_list[0]['output_path']
+        if should_prepare_output:
+            utils.prepare_output_file(output_path)
+            logger.info('Prepared output file: {}'.format(output_path))
+        elif ensure_output_exists:
+            utils.ensure_output_file(output_path)
+            logger.info('Ensured output file exists: {}'.format(output_path))
         else:
-            filename = ''
-
-        output_path = os.path.join(proj_home, 'logs', f'{filename}_{run_id}_classified.tsv')
-
-        utils.prepare_output_file(output_path)
-        logger.info('Prepared output file: {}'.format(output_path))
+            logger.info('Using existing prepared output file: {}'.format(output_path))
 
         delay_message = config.get('DELAY_MESSAGE', False)
         logger.debug("Delay set for queue messages: {}".format(delay_message))
@@ -183,12 +247,13 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
                       'abstract': record_abstract,
                       'text': record_title + ' ' + record_abstract,
                       'operation_step': operation_step,
-                      'run_id': run_id,
                       'output_format': output_format,
                       'override': None,
                       'output_path': output_path,
                       'perf_metrics_context_id': request.get("perf_metrics_context_id"),
                       }
+            if run_id is not None:
+                record['run_id'] = run_id
             normalized_records.append(record)
 
         for sub_batch in _chunk_records(normalized_records, classify_batch_size):
@@ -201,6 +266,7 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
             enqueue_start = time.perf_counter()
             if delay_message:
                 logger.debug('Using delay')
+                logger.debug('Output Record before delay: {}'.format(out_message))
                 task_send_input_record_to_classifier.delay(out_message)
             else:
                 task_send_input_record_to_classifier(out_message)
@@ -221,8 +287,11 @@ def task_update_record(message,pipeline='classifier', output_format='tsv'):
                 config=config,
             )
 
-        return {"run_id": run_id, "records_submitted": len(request_list)}
-            
+        result = {"records_submitted": len(request_list)}
+        if run_id is not None:
+            result["run_id"] = run_id
+        return result
+
 
 # @app.task(queue="unclassified-queue")
 # @app.task(queue="update-record")
@@ -253,6 +322,21 @@ def task_send_input_record_to_classifier(message):
     ):
         delay_message = config.get('DELAY_MESSAGE', False)
         logger.debug("Delay set for queue messages: {}".format(delay_message))
+
+        claimed_records = []
+        for index, record in enumerate(records):
+            if pre_ingest_state._claim_pre_ingest_stage(
+                record,
+                "classify_inflight",
+                pre_ingest_state._PRE_INGEST_CLASSIFY_LEASE_SECONDS,
+            ):
+                claimed_records.append(record)
+
+        if not claimed_records:
+            logger.info("Skipping classify task because all pre-ingest records were already processed")
+            return
+
+        records = claimed_records
 
         fake_data = config.get('FAKE_DATA', False)
         forced_fake_data = os.getenv("PERF_FORCE_FAKE_DATA")
@@ -338,9 +422,13 @@ def task_send_input_record_to_classifier(message):
         logger.debug("Records after classification and thresholding: {}".format(processed_records))
         logger.debug("Record Type: {}".format(type(processed_records)))
 
+        for record in processed_records:
+            pre_ingest_state._mark_pre_ingest_stage(record, "classify_done")
+
         out_message = utils.list_to_ClassifyRequestRecordList(processed_records)
 
         if delay_message:
+            logger.debug('out_message before delay: {}'.format(out_message))
             task_index_classified_record.delay(out_message)
         else:
             task_index_classified_record(out_message)
@@ -363,6 +451,7 @@ def task_index_classified_record(message):
     records = utils.classifyRequestRecordList_to_list(message)
     run_id = records[0].get("run_id") if records else None
     context_id = _batch_context_id(records)
+    logger.debug("Records received for indexing: {}".format(records))
     with perf_metrics.timed_profile(
         category="task_timing",
         name="task_index_classified_record",
@@ -378,8 +467,32 @@ def task_index_classified_record(message):
         logger.debug(f'Record type: {type(message)}')
         touched_output_paths = set()
         results = []
+
+        def _has_identifier(record):
+            return bool(record.get("bibcode") or record.get("scix_id"))
+
         if records and all(record.get("operation_step") in {"classify", "classify_verify"} for record in records):
             results = app.index_records_batch(records)
+        elif records and all(record.get("operation_step") == "pre_ingest" for record in records):
+            claimed_specs = []
+            for index, record in enumerate(records):
+                if pre_ingest_state._claim_pre_ingest_stage(
+                    record,
+                    "index_inflight",
+                    pre_ingest_state._PRE_INGEST_INDEX_LEASE_SECONDS,
+                ):
+                    claimed_specs.append((index, record))
+            indexed_specs = [(index, record) for index, record in claimed_specs if _has_identifier(record)]
+            anonymous_specs = [(index, record) for index, record in claimed_specs if not _has_identifier(record)]
+            indexed_results = []
+            if indexed_specs:
+                indexed_results = app.index_records_batch([record for _, record in indexed_specs])
+            ordered_results = {}
+            for (index, _), result in zip(indexed_specs, indexed_results):
+                ordered_results[index] = result
+            for index, record in anonymous_specs:
+                ordered_results[index] = (record, "record_pre_ingested")
+            results = [ordered_results[index] for index in range(len(records)) if index in ordered_results]
         else:
             for record in records:
                 results.append(app.index_record(record))
@@ -406,11 +519,13 @@ def task_index_classified_record(message):
                 )
             logger.debug(f'Record: {record}, Success: {success}')
             if success == "record_indexed":
-                if record['operation_step'] == 'classify_verify':
+                if record['operation_step'] in {'classify_verify', 'pre_ingest'}:
                     logger.info(f"Record {record_id} indexed")
                     utils.add_record_to_output_file(record)
                     if record.get("output_path"):
                         touched_output_paths.add(record["output_path"])
+                    if record['operation_step'] == 'pre_ingest':
+                        pre_ingest_state._mark_pre_ingest_stage(record, "indexed_done")
                 if record['operation_step'] == 'classify':
                     logger.info(f"Record {record_id} indexed")
                     app.add_record_to_output_file(record)
@@ -419,6 +534,12 @@ def task_index_classified_record(message):
                     resend_message = utils.list_to_ClassifyRequestRecordList([record])
                     task_resend_to_master(resend_message)
                     logger.info(f"Record {record_id} sent to master")
+            elif success == "record_pre_ingested":
+                logger.info(f"Record {record_id or record.get('title') or record.get('run_id')} pre-ingested")
+                utils.add_record_to_output_file(record)
+                if record.get("output_path"):
+                    touched_output_paths.add(record["output_path"])
+                pre_ingest_state._mark_pre_ingest_stage(record, "indexed_done")
 
             elif success == "record_validated":
                 resend_message = utils.list_to_ClassifyRequestRecordList([record])
@@ -543,6 +664,31 @@ def task_resend_to_master(message):
                     record_id = record['bibcode']
                 logger.info(f"Sending record {record_id} to master")
                 task_message_to_master(record)
+
+
+@app.task(queue="send-record-to-master")
+def task_resend_validated_to_master(days):
+    """
+    Re-send records validated in the last N days to Master Pipeline.
+
+    Parameters:
+        days (int): Positive number of days to look back from current UTC time
+    """
+    with perf_metrics.timed_profile(
+        category="task_timing",
+        name="task_resend_validated_to_master",
+        run_id=None,
+        context_id=None,
+        record_id=None,
+        extra={"days": days},
+        config=config,
+    ):
+        logger.info(f"Resending records validated in the last {days} days to master")
+        record_list = app.query_recently_validated_final_collection_table(days=days)
+        for record in record_list:
+            record_id = _record_identifier(record)
+            logger.info(f"Sending record {record_id} to master")
+            task_message_to_master(record)
 
 
 # @app.task(queue="classify-record")

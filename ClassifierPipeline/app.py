@@ -27,6 +27,7 @@ import pickle
 import zlib
 import csv
 import time
+from datetime import timedelta
 
 import ClassifierPipeline.models as models
 import ClassifierPipeline.utilities as utils
@@ -60,6 +61,14 @@ class SciXClassifierCelery(ADSCelery):
     - Manage model and override tracking
     - Update validated collections and handle manual overrides
     """
+
+    def _set_final_collection_validation(self, final_collection_row, validated):
+        final_collection_row.validated = validated
+        if validated:
+            if getattr(final_collection_row, 'validated_at', None) is None:
+                final_collection_row.validated_at = get_date()
+        else:
+            final_collection_row.validated_at = None
 
     def _ensure_runtime_caches(self):
         if not hasattr(self, "_cached_model_metadata_key"):
@@ -565,7 +574,7 @@ class SciXClassifierCelery(ADSCelery):
                     logger.debug(f'update_final_collection_query: {update_final_collection_query}')
                     logger.debug(f'update_final_collection_query with override: {record["override"]}')
                     update_final_collection_query.collection = record['override']
-                    update_final_collection_query.validated = True
+                    self._set_final_collection_validation(update_final_collection_query, True)
                     session.commit()
                     success = 'record_validated'
 
@@ -575,7 +584,7 @@ class SciXClassifierCelery(ADSCelery):
                     update_final_collection_query_True = session.query(models.FinalCollectionTable).filter(and_(or_(and_(models.FinalCollectionTable.scix_id == record['scix_id'], models.FinalCollectionTable.scix_id != None), and_(models.FinalCollectionTable.bibcode == record['bibcode'], models.FinalCollectionTable.bibcode != None))), models.FinalCollectionTable.validated == True).order_by(models.FinalCollectionTable.created.desc()).first()
 
                     if update_final_collection_query_False is not None:
-                        update_final_collection_query_False.validated = True
+                        self._set_final_collection_validation(update_final_collection_query_False, True)
                         session.commit()
                         success = 'record_validated'
                     if update_final_collection_query_True is not None:
@@ -670,6 +679,59 @@ class SciXClassifierCelery(ADSCelery):
                 logger.debug(f'Record list: {record_list}')
                 return record_list
 
+    def query_recently_validated_final_collection_table(self, days, perf_metrics_context_id=None):
+        """
+        Query final_collection rows validated within the last N days.
+
+        Parameters:
+            days (int): Positive number of days to look back
+
+        Returns:
+            list of dict: Matched records with bibcode, scix_id, and collections
+        """
+        cutoff = get_date() - timedelta(days=days)
+        with perf_metrics.timed_profile(
+            category="app_timing",
+            name="query_recently_validated_final_collection_table",
+            run_id=None,
+            context_id=perf_metrics_context_id,
+            record_id=None,
+            extra={"days": days},
+            config=config,
+        ):
+            with self.session_scope() as session:
+                final_collection_rows = (
+                    session.query(models.FinalCollectionTable)
+                    .filter(
+                        and_(
+                            models.FinalCollectionTable.validated == True,
+                            models.FinalCollectionTable.validated_at != None,
+                            models.FinalCollectionTable.validated_at >= cutoff,
+                        )
+                    )
+                    .order_by(models.FinalCollectionTable.validated_at.desc())
+                    .all()
+                )
+                record_list = []
+                seen_keys = set()
+                for final_collection_row in final_collection_rows:
+                    dedupe_key = self._result_record_key(
+                        bibcode=final_collection_row.bibcode,
+                        scix_id=final_collection_row.scix_id,
+                    )
+                    if dedupe_key in seen_keys:
+                        continue
+                    seen_keys.add(dedupe_key)
+                    record_list.append(
+                        {
+                            'bibcode': final_collection_row.bibcode,
+                            'scix_id': final_collection_row.scix_id,
+                            'collections': final_collection_row.collection,
+                        }
+                    )
+                logger.debug(f'Recently validated record list: {record_list}')
+                return record_list
+
     def update_validated_records(self, run_id):
         """
         Updates the FinalCollectionTable to mark unvalidated records as validated 
@@ -705,7 +767,7 @@ class SciXClassifierCelery(ADSCelery):
                     update_final_collection_query = session.query(models.FinalCollectionTable).filter(and_(or_(and_(models.FinalCollectionTable.scix_id == record['scix_id'], models.FinalCollectionTable.scix_id != None), and_(models.FinalCollectionTable.bibcode == record['bibcode'], models.FinalCollectionTable.bibcode != None))), models.FinalCollectionTable.validated == False).order_by(models.FinalCollectionTable.created.desc()).first()
 
                     if update_final_collection_query is not None:
-                        update_final_collection_query.validated = True
+                        self._set_final_collection_validation(update_final_collection_query, True)
                         session.commit()
                         success_list.append("success")
 

@@ -47,7 +47,10 @@ def test_prepare_output_file_writes_header(monkeypatch, base_fake_config, dummy_
     output = tmp_path / "out.tsv"
     module.prepare_output_file(str(output))
     text = output.read_text()
-    assert text.startswith("bibcode\tscix_id\trun_id\ttitle\tcollections")
+    assert text.startswith("bibcode\tscix_id\trun_id\ttitle\tabstract\tcollections")
+    assert "astrophysics_score" in text
+    assert "gross_collection" in text
+    assert "gross_collection_override" in text
 
 
 def test_add_record_to_output_file_appends_row(monkeypatch, base_fake_config, dummy_logger, tmp_path):
@@ -59,6 +62,7 @@ def test_add_record_to_output_file_appends_row(monkeypatch, base_fake_config, du
         "scix_id": "S",
         "run_id": "R",
         "title": "Title",
+        "abstract": "Abstract",
         "collections": ["Astronomy", "Other"],
         "collection_scores": [0.61, 0.21],
         "scores": [0.61, 0.2, 0.4, 0.5, 0.1, 0.35, 0.21, 0.1],
@@ -68,7 +72,11 @@ def test_add_record_to_output_file_appends_row(monkeypatch, base_fake_config, du
     module.flush_output_file(str(output))
     lines = output.read_text().strip().splitlines()
     assert len(lines) == 2
-    assert lines[1].startswith("B\tS\tR\tTitle\tAstronomy, Other")
+    assert lines[1].startswith("B\tS\tR\tTitle\tAbstract\tAstronomy, Other")
+    columns = lines[1].split("\t")
+    assert columns[7:11] == ["0.61", "0.2", "0.4", "0.61"]
+    assert columns[11:16] == ["0.5", "0.1", "0.35", "0.21", "0.5"]
+    assert columns[16:18] == ["0.1", "astronomy"]
 
 
 def test_add_record_to_output_file_buffers_until_threshold(monkeypatch, base_fake_config, dummy_logger, tmp_path):
@@ -80,6 +88,7 @@ def test_add_record_to_output_file_buffers_until_threshold(monkeypatch, base_fak
         "scix_id": "S",
         "run_id": "R",
         "title": "Title",
+        "abstract": "Abstract",
         "collections": ["Astronomy"],
         "collection_scores": [0.61],
         "scores": [0.61, 0.2, 0.4, 0.5, 0.1, 0.35, 0.21, 0.1],
@@ -89,7 +98,7 @@ def test_add_record_to_output_file_buffers_until_threshold(monkeypatch, base_fak
         current = dict(record, bibcode=f"B{index}")
         module.add_record_to_output_file(current)
     assert output.read_text().strip().splitlines() == [
-        "bibcode\tscix_id\trun_id\ttitle\tcollections\tcollection_scores\tastronomy_score\theliophysics_score\tplanetary_science_score\tearth_science_score\tbiology_score\tphysics_score\tother_score\tgarbage_score\toverride"
+        "bibcode\tscix_id\trun_id\ttitle\tabstract\tcollections\tcollection_scores\tastrophysics_score\theliophysics_score\tplanetary_science_score\tastronomy_score\tearth_science_score\tbiology_score\tphysics_score\tother_score\tgeneral_score\tgarbage_score\tgross_collection\tgross_collection_override\toverride"
     ]
 
 
@@ -102,6 +111,7 @@ def test_add_record_to_output_file_flushes_at_threshold(monkeypatch, base_fake_c
         "scix_id": "S",
         "run_id": "R",
         "title": "Title",
+        "abstract": "Abstract",
         "collections": ["Astronomy"],
         "collection_scores": [0.61],
         "scores": [0.61, 0.2, 0.4, 0.5, 0.1, 0.35, 0.21, 0.1],
@@ -122,6 +132,7 @@ def test_flush_output_file_flushes_remaining_rows(monkeypatch, base_fake_config,
         "scix_id": "S",
         "run_id": "R",
         "title": "Title",
+        "abstract": "Abstract",
         "collections": ["Astronomy"],
         "collection_scores": [0.61],
         "scores": [0.61, 0.2, 0.4, 0.5, 0.1, 0.35, 0.21, 0.1],
@@ -141,6 +152,7 @@ def test_prepare_output_file_resets_existing_buffer(monkeypatch, base_fake_confi
         "scix_id": "S",
         "run_id": "R",
         "title": "Title",
+        "abstract": "Abstract",
         "collections": ["Astronomy"],
         "collection_scores": [0.61],
         "scores": [0.61, 0.2, 0.4, 0.5, 0.1, 0.35, 0.21, 0.1],
@@ -150,6 +162,115 @@ def test_prepare_output_file_resets_existing_buffer(monkeypatch, base_fake_confi
     module.prepare_output_file(str(output))
     module.flush_output_file(str(output))
     assert len(output.read_text().strip().splitlines()) == 1
+
+
+def test_ensure_output_file_creates_header_without_truncating_existing_rows(monkeypatch, base_fake_config, dummy_logger, tmp_path):
+    module = _import_utilities(monkeypatch, base_fake_config, dummy_logger)
+    output = tmp_path / "out.tsv"
+    module.ensure_output_file(str(output))
+    initial_lines = output.read_text().strip().splitlines()
+    assert len(initial_lines) == 1
+
+    with open(output, "a", newline="") as handle:
+        handle.write("B\tS\tR\tTitle\n")
+
+    module.ensure_output_file(str(output))
+    lines = output.read_text().strip().splitlines()
+    assert len(lines) == 2
+
+
+def test_ensure_output_file_registers_global_flush_handler(monkeypatch, base_fake_config, dummy_logger, tmp_path):
+    module = _import_utilities(monkeypatch, base_fake_config, dummy_logger)
+    registered = []
+    monkeypatch.setattr(module.atexit, "register", lambda func: registered.append(func))
+    monkeypatch.setattr(module, "_OUTPUT_FLUSH_REGISTERED", False, raising=True)
+
+    module.ensure_output_file(str(tmp_path / "out.tsv"))
+
+    assert registered == [module.flush_output_file]
+
+
+def test_ensure_output_file_does_not_reregister_flush_handler(monkeypatch, base_fake_config, dummy_logger, tmp_path):
+    module = _import_utilities(monkeypatch, base_fake_config, dummy_logger)
+    registered = []
+    monkeypatch.setattr(module.atexit, "register", lambda func: registered.append(func))
+    monkeypatch.setattr(module, "_OUTPUT_FLUSH_REGISTERED", True, raising=True)
+
+    module.ensure_output_file(str(tmp_path / "out.tsv"))
+
+    assert registered == []
+
+
+def test_build_output_row_uses_blank_identifiers_and_derived_scores(monkeypatch, base_fake_config, dummy_logger):
+    module = _import_utilities(monkeypatch, base_fake_config, dummy_logger)
+    row = module.build_output_row(
+        {
+            "title": "Title",
+            "abstract": "Abstract",
+            "run_id": "R",
+            "collections": ["Other Physics"],
+            "collection_scores": [0.81],
+            "scores": [0.12, 0.23, 0.34, 0.91, 0.45, 0.81, 0.67, 0.05],
+        }
+    )
+    assert row[:5] == ["", "", "R", "Title", "Abstract"]
+    assert row[7:11] == [0.12, 0.23, 0.34, 0.34]
+    assert row[11:16] == [0.91, 0.45, 0.81, 0.67, 0.91]
+    assert row[16:19] == [0.05, "general", ""]
+
+
+def test_build_output_row_gross_collection_tie_breaks_to_astronomy(monkeypatch, base_fake_config, dummy_logger):
+    module = _import_utilities(monkeypatch, base_fake_config, dummy_logger)
+    row = module.build_output_row(
+        {
+            "title": "Tie",
+            "abstract": "Abstract",
+            "run_id": "R",
+            "collections": [],
+            "collection_scores": [],
+            "scores": [0.5, 0.4, 0.3, 0.5, 0.4, 0.5, 0.2, 0.1],
+        }
+    )
+    assert row[10] == 0.5
+    assert row[13] == 0.5
+    assert row[15] == 0.5
+    assert row[17] == "astronomy"
+
+
+def test_build_output_row_preserves_gross_collection_override(monkeypatch, base_fake_config, dummy_logger):
+    module = _import_utilities(monkeypatch, base_fake_config, dummy_logger)
+    row = module.build_output_row(
+        {
+            "title": "Override",
+            "abstract": "Abstract",
+            "run_id": "R",
+            "collections": [],
+            "collection_scores": [],
+            "scores": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8],
+            "gross_collection_override": "physics",
+        }
+    )
+    assert row[18] == "physics"
+
+
+def test_safe_score_logs_debug_and_returns_zero_on_bad_payload(monkeypatch, base_fake_config, dummy_logger):
+    module = _import_utilities(monkeypatch, base_fake_config, dummy_logger)
+    debug_messages = []
+    monkeypatch.setattr(
+        module,
+        "logger",
+        types.SimpleNamespace(
+            debug=lambda message: debug_messages.append(message),
+            info=lambda *args, **kwargs: None,
+            warning=lambda *args, **kwargs: None,
+            error=lambda *args, **kwargs: None,
+            exception=lambda *args, **kwargs: None,
+        ),
+        raising=True,
+    )
+    assert module._safe_score(["bad"], 0) == 0.0
+    assert debug_messages
+    assert "Unable to parse score at index 0" in debug_messages[0]
 
 
 def test_buffering_is_isolated_per_output_path(monkeypatch, base_fake_config, dummy_logger, tmp_path):
@@ -228,6 +349,18 @@ def test_list_to_request_record_list_builds_payload(monkeypatch, base_fake_confi
     monkeypatch.setattr(module, "ParseDict", lambda payload, message: {"payload": payload, "message": message})
     out = module.list_to_ClassifyRequestRecordList([{"bibcode": "B", "extra": "x"}])
     assert out["payload"] == {"classify_requests": [{"bibcode": "B"}]}
+
+
+def test_filter_allowed_fields_preserves_integer_run_id(monkeypatch, base_fake_config, dummy_logger):
+    module = _import_utilities(monkeypatch, base_fake_config, dummy_logger)
+    filtered = module.filter_allowed_fields({"bibcode": "B", "run_id": 123456789, "extra": "x"})
+    assert filtered == {"bibcode": "B", "run_id": 123456789}
+
+
+def test_filter_allowed_fields_drops_output_prepared(monkeypatch, base_fake_config, dummy_logger):
+    module = _import_utilities(monkeypatch, base_fake_config, dummy_logger)
+    filtered = module.filter_allowed_fields({"bibcode": "B", "output_prepared": True, "run_id": 123456789})
+    assert filtered == {"bibcode": "B", "run_id": 123456789}
 
 
 def test_dict_to_response_record_uses_filtered_payload(monkeypatch, base_fake_config, dummy_logger):

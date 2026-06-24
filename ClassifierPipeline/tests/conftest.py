@@ -54,6 +54,7 @@ def base_fake_config():
         "CLASSIFIER_PRE_FORWARD_BATCH_SIZE": 100,
         "MODEL_INFERENCE_BATCH_SIZE": 16,
         "TEST_INPUT_DATA": "ClassifierPipeline/tests/stub_data/classifier_request.json",
+        "PRE_INGEST_OUTPUT_PREFIX": "input-text",
     }
 
 

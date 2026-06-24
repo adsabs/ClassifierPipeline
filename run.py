@@ -30,6 +30,9 @@ python run.py -s -x scix:abcd-1234-ef56
 # Resend all records by run_id
 python run.py -s -i 2024-08-01T12:00:00Z
 
+# Resend records validated in the last 7 days
+python run.py -s --validated -d 7
+
 Input formats
 -------------
 New records CSV (-n):
@@ -65,12 +68,17 @@ import time
 import json
 import argparse
 import copy
-from ClassifierPipeline.tasks import task_update_record, task_update_validated_records, task_index_classified_record, task_resend_to_master
-# import ClassifierPipeline.tasks as tasks
-# from ClassifierPipeline.utilities import check_is_allowed_category
+import itertools
+from ClassifierPipeline.tasks import (
+    prepare_pre_ingest_run,
+    task_update_record,
+    task_update_validated_records,
+    task_index_classified_record,
+    task_resend_to_master,
+    task_resend_validated_to_master,
+)
 import ClassifierPipeline.utilities as utils
 
-# import classifyrecord_pb2
 from google.protobuf.json_format import Parse, MessageToDict
 from adsmsg import ClassifyRequestRecordList
 
@@ -86,6 +94,28 @@ logger = setup_logging('run.py', proj_home=proj_home,
 
 
 # =============================== FUNCTIONS ======================================= #
+
+def positive_int(value):
+    try:
+        parsed_value = int(value)
+    except (TypeError, ValueError):
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    if parsed_value <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed_value
+
+
+def get_file_ingest_batch_size(override=None, default=500):
+    if override is not None:
+        return override
+    try:
+        value = int(config.get("FILE_INGEST_BATCH_SIZE", default) or default)
+        if value > 0:
+            return value
+    except (TypeError, ValueError):
+        pass
+    return default
+
 
 def row_to_dictionary(row):
     """
@@ -115,6 +145,103 @@ def row_to_dictionary(row):
     record['abstract'] = row[2]
 
     return record
+
+
+def pre_ingest_row_to_dictionary(row, output_path=None):
+    """
+    Convert a pre-ingest TSV row into a minimal request dictionary.
+
+    Parameters
+    ----------
+    row : list[str]
+        Either:
+        - [title, abstract]
+        - [identifier, title, abstract], where `identifier` is either a
+          bibcode or a SciX ID (`scix:xxxx-xxxx-xxxx`).
+
+    Returns
+    -------
+    dict
+        Dictionary with keys:
+          - 'title'
+          - 'abstract'
+          - 'operation_step'
+    """
+    if len(row) < 2:
+        raise ValueError(f"Expected 2 columns, got {len(row)}: {row!r}")
+
+    record = {'operation_step': 'pre_ingest'}
+    if len(row) == 2:
+        record['title'] = row[0]
+        record['abstract'] = row[1]
+    else:
+        identifier_kind = utils.check_identifier(row[0])
+        if identifier_kind is None:
+            raise ValueError(f"Expected a bibcode or SciX ID in the first column, got {row[0]!r}")
+        record[identifier_kind] = row[0]
+        record['title'] = row[1]
+        record['abstract'] = row[2]
+    if output_path:
+        record['output_path'] = output_path
+    return record
+
+
+def is_pre_ingest_header(row):
+    if len(row) < 2:
+        return False
+    normalized = [str(element).strip().lower() for element in row[:3]]
+    if len(normalized) >= 3 and normalized[0] in {'bibcode', 'scixid', 'scix_id'}:
+        return normalized[1] == 'title' and normalized[2] in {'abstract', 'text', 'body'}
+    return normalized[0] == 'title' and normalized[1] in {'abstract', 'text', 'body'}
+
+
+PRE_INGEST_DELIMITER_ALIASES = {
+    ',': ',',
+    'comma': ',',
+    'csv': ',',
+    r'\t': '\t',
+    'tab': '\t',
+    'tsv': '\t',
+}
+
+UNSUPPORTED_PRE_INGEST_DELIMITER_MESSAGE = "Unsupported delimiter {delimiter!r}. Use one of: comma, csv, tab, tsv, ',', '\\t'."
+
+
+def normalize_pre_ingest_delimiter(delimiter):
+    if delimiter is None:
+        return None
+    normalized = str(delimiter).strip().lower()
+    if normalized not in PRE_INGEST_DELIMITER_ALIASES:
+        raise ValueError(UNSUPPORTED_PRE_INGEST_DELIMITER_MESSAGE.format(delimiter=delimiter))
+    return PRE_INGEST_DELIMITER_ALIASES[normalized]
+
+
+def sniff_pre_ingest_delimiter(records_path):
+    with open(records_path, 'r', newline='') as file:
+        sample = file.read(4096)
+    if not sample:
+        return None
+    try:
+        dialect = csv.Sniffer().sniff(sample, delimiters=',\t')
+        return dialect.delimiter
+    except csv.Error:
+        return None
+
+
+def get_pre_ingest_delimiter(records_path, delimiter=None):
+    normalized = normalize_pre_ingest_delimiter(delimiter)
+    if normalized is not None:
+        return normalized
+
+    sniffed = sniff_pre_ingest_delimiter(records_path)
+    if sniffed in {',', '\t'}:
+        logger.debug(f"Sniffed delimiter {sniffed!r} from {records_path}")
+        return sniffed
+
+    extension = os.path.splitext(records_path)[1].lower()
+    if extension == '.csv':
+        return ','
+    return '\t'
 
 
 def batch_new_records(records_path, batch_size=500):
@@ -170,6 +297,88 @@ def batch_new_records(records_path, batch_size=500):
             task_update_record.delay(message)
 
 
+def batch_pre_ingest_records(records_path, batch_size=500, output_prefix=None, delimiter=None):
+    """
+    Read a TSV, CSV, or TXT file of pre-ingest records and enqueue messages in batches.
+
+    Parameters
+    ----------
+    records_path : str
+        Path to a delimited file containing title and abstract columns.
+        If `delimiter` is omitted, the parser first tries to sniff comma/tab
+        delimiters from file content, then falls back to extension-based
+        defaults: `.csv` -> comma, everything else -> tab. The file may
+        optionally include a header row.
+    batch_size : int, default 500
+        Number of rows per message batch.
+    output_prefix : str, optional
+        Override for the generated output filename prefix.
+    delimiter : str, optional
+        Explicit delimiter override. Supported values are comma/csv, and
+        tab/tsv/\\t.
+    """
+    batch = []
+    output_name = output_prefix or os.path.basename(records_path)
+    delimiter = get_pre_ingest_delimiter(records_path, delimiter=delimiter)
+    run_id, prepared_output_path = prepare_pre_ingest_run(output_name, proj_home_path=proj_home)
+
+    with open(records_path, 'r', newline='') as file:
+        reader = csv.reader(file, delimiter=delimiter)
+
+        first_row = next(reader)
+        rows = reader
+        if is_pre_ingest_header(first_row):
+            print("Header detected:", first_row)
+        else:
+            print("No header found, processing first row as data.")
+            rows = itertools.chain([first_row], reader)
+
+        for i, row in enumerate(rows, 1):
+            try:
+                record = pre_ingest_row_to_dictionary(row, output_path=prepared_output_path)
+                record["run_id"] = run_id
+                batch.append(record)
+            except ValueError as exc:
+                raise ValueError(
+                    f"{exc} while parsing {records_path!r} with delimiter {delimiter!r}. "
+                    "Supply --delimiter if the file is not being parsed correctly."
+                ) from exc
+
+            if i % batch_size == 0:
+                print(f"Processing batch {i // batch_size}")
+                message = utils.list_to_ClassifyRequestRecordList(batch)
+                task_update_record.delay(message)
+                batch = []
+
+        if batch:
+            print("Processing final batch")
+            message = utils.list_to_ClassifyRequestRecordList(batch)
+            task_update_record.delay(message)
+
+
+def queue_pre_ingest_input_text(text, output_prefix=None):
+    """
+    Submit a single pre-ingest record built from inline text.
+
+    Parameters
+    ----------
+    text : str
+        Free-form text to classify. Stored as the abstract with blank title.
+    """
+    output_name = output_prefix or config.get('PRE_INGEST_OUTPUT_PREFIX', 'input-text')
+    run_id, output_path = prepare_pre_ingest_run(output_name, proj_home_path=proj_home)
+    message = utils.list_to_ClassifyRequestRecordList([
+        {
+            'title': '',
+            'abstract': text,
+            'operation_step': 'pre_ingest',
+            'run_id': run_id,
+            'output_path': output_path,
+        }
+    ])
+    task_update_record.delay(message)
+
+
 def records2_fake_protobuf(record):
     """
     Wrap a single record dict into a fake serialized request list message (JSON).
@@ -221,7 +430,8 @@ def prepare_records(records_path, operation_step='validate'):
     1 : scix_id (or blank)
     2 : run_id
     3 : title
-    14: override (comma-separated categories)
+    4 : abstract
+    15: override (comma-separated categories)
     """
     print(f'Processing records from: {records_path}')
     print()
@@ -229,6 +439,10 @@ def prepare_records(records_path, operation_step='validate'):
     with open(records_path, 'r') as f:
         csv_reader = csv.reader(f, delimiter='\t')
         headers = next(csv_reader)
+        header_positions = {name: index for index, name in enumerate(headers)}
+        title_index = header_positions.get('title', 3)
+        abstract_index = header_positions.get('abstract')
+        override_index = header_positions.get('override', 15 if abstract_index is not None else 14)
 
         for row in csv_reader:
             print(f'Processing row: {row}')
@@ -238,25 +452,19 @@ def prepare_records(records_path, operation_step='validate'):
             elif utils.check_identifier(row[1]) == 'scix_id':
                 record['scix_id'] = row[1]
             record['run_id'] = row[2]
-            record['title'] = row[3]
+            record['title'] = row[title_index]
+            if abstract_index is not None and abstract_index < len(row):
+                record['abstract'] = row[abstract_index]
             record['operation_step'] = operation_step
 
-            record['override'] = row[14].split(',')
+            record['override'] = row[override_index].split(',')
             print(f'validating record: {record}')
             logger.info(f'validating record: {record}')
             message = utils.list_to_ClassifyRequestRecordList([record])
             task_index_classified_record(message)
 
 
-
-# =============================== MAIN ======================================= #
-
-# To test the classifier
-# python run.py -n -r ClassifierPipeline/tests/stub_data/stub_new_records.csv
-
-if __name__ == '__main__':
-
-    print('Run.py - parsing input')
+def build_parser():
     parser = argparse.ArgumentParser(description='Process user input.')
 
     parser.add_argument('-n',
@@ -271,12 +479,37 @@ if __name__ == '__main__':
                         action='store_true',
                         help='Return list to manually validate classifications')
 
+    parser.add_argument('-p',
+                        '--pre-ingest',
+                        dest='pre_ingest',
+                        action='store_true',
+                        help='Classify title/abstract records without indexing or forwarding')
+
     parser.add_argument('-r',
                         '--records',
                         dest='records',
                         action='store',
-                        help='Path to comma delimited list of new records' +
-                             'to process: columns: bibcode, title, abstract')
+                        help='Path to a .csv, .tsv, or .txt file of title/abstract pairs for pre-ingest classification')
+
+    parser.add_argument('--input-text',
+                        dest='input_text',
+                        action='store',
+                        help='Inline text segment to classify through the pre-ingest pipeline')
+
+    parser.add_argument('--delimiter',
+                        dest='delimiter',
+                        action='store',
+                        help="Override pre-ingest record parsing delimiter: comma/csv or tab/tsv. If omitted, delimiter is auto-detected from content, then falls back to file extension.")
+
+    parser.add_argument('--output-prefix',
+                        dest='output_prefix',
+                        action='store',
+                        help='Override the output TSV filename prefix for pre-ingest runs')
+
+    parser.add_argument('--file-ingest-batch-size',
+                        dest='file_ingest_batch_size',
+                        type=positive_int,
+                        help='Override FILE_INGEST_BATCH_SIZE for file-based new-record and pre-ingest runs')
 
     parser.add_argument('-t',
                         '--test',
@@ -289,6 +522,17 @@ if __name__ == '__main__':
                         dest='resend',
                         action='store_true',
                         help='Resend results to Master Pipeline')
+
+    parser.add_argument('--validated',
+                        dest='validated',
+                        action='store_true',
+                        help='With --resend, resend records validated in the last N days')
+
+    parser.add_argument('-d',
+                        '--days',
+                        dest='days',
+                        type=positive_int,
+                        help='Number of days to look back for --resend --validated')
 
     parser.add_argument('-b',
                         '--bibcode',
@@ -308,21 +552,72 @@ if __name__ == '__main__':
                         action='store',
                         help='Run_id of record batch to resend')
 
+    return parser
 
-    args = parser.parse_args()
 
+def _validate_args(parser, args):
+    if args.pre_ingest:
+        if bool(args.records) == bool(args.input_text):
+            parser.error('`--pre-ingest` requires exactly one of `--records` or `--input-text`.')
+    elif args.input_text:
+        parser.error('`--input-text` is only supported with `--pre-ingest`.')
+    if args.output_prefix and not args.pre_ingest:
+        parser.error('`--output-prefix` is only supported with `--pre-ingest`.')
+    if args.delimiter and not args.pre_ingest:
+        parser.error('`--delimiter` is only supported with `--pre-ingest`.')
+    if args.delimiter and args.input_text:
+        parser.error('`--delimiter` is only supported with `--records` in `--pre-ingest` mode.')
+    if args.file_ingest_batch_size is not None:
+        uses_file_ingest = bool(args.new_records) or (args.pre_ingest and bool(args.records))
+        if not uses_file_ingest:
+            parser.error('`--file-ingest-batch-size` is only supported with `--new_records` or `--pre-ingest --records`.')
+    resend_selectors = [args.bibcode, args.scix_id, args.run_id, args.validated]
+    selected_resend_count = sum(bool(selector) for selector in resend_selectors)
+    if args.resend and selected_resend_count != 1:
+        parser.error('`--resend` requires exactly one of `--bibcode`, `--scix_id`, `--run_id`, or `--validated`.')
+    if not args.resend and (args.validated or args.days is not None):
+        parser.error('`--validated` and `--days` are only supported with `--resend`.')
+    if args.validated and args.days is None:
+        parser.error('`--resend --validated` requires `--days`.')
+    if args.days is not None and not args.validated:
+        parser.error('`--days` is only supported with `--resend --validated`.')
+    if args.delimiter:
+        try:
+            normalize_pre_ingest_delimiter(args.delimiter)
+        except ValueError:
+            parser.error(UNSUPPORTED_PRE_INGEST_DELIMITER_MESSAGE.format(delimiter=args.delimiter))
+
+
+def main(argv=None):
+    print('Run.py - parsing input')
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    _validate_args(parser, args)
+
+    records_path = args.records if args.records else None
 
     if args.records:
-        records_path = args.records
         print(records_path)
 
     if args.validate:
         print("Validating records")
-        prepare_records(records_path,operation_step='validate')
+        prepare_records(records_path, operation_step='validate')
 
     if args.new_records:
         print("Processing new records")
-        batch_new_records(records_path)
+        batch_new_records(records_path, batch_size=get_file_ingest_batch_size(args.file_ingest_batch_size))
+
+    if args.pre_ingest:
+        print("Processing pre-ingest records")
+        if args.records:
+            batch_pre_ingest_records(
+                records_path,
+                batch_size=get_file_ingest_batch_size(args.file_ingest_batch_size),
+                output_prefix=args.output_prefix,
+                delimiter=args.delimiter,
+            )
+        else:
+            queue_pre_ingest_input_text(args.input_text, output_prefix=args.output_prefix)
 
     if args.bibcode:
         print('Resending bibcode')
@@ -330,18 +625,22 @@ if __name__ == '__main__':
 
     if args.resend:
 
-        if args.bibcode:
+        if args.validated:
+            print(f'Resending records validated in the last {args.days} days')
+            task_resend_validated_to_master(args.days)
+        elif args.bibcode:
             print(f'Resending bibcode {args.bibcode}')
             record = {'bibcode' : args.bibcode}
-        if args.scix_id:
+        elif args.scix_id:
             print(f'Resending scix_id {args.scix_id}')
             record = {'scix_id' : args.scix_id}
-        if args.run_id:
+        elif args.run_id:
             print(f'Resending run_id {args.run_id}')
             record = {'run_id' : args.run_id}
 
-        message = utils.list_to_ClassifyRequestRecordList([record])
-        task_resend_to_master(message)
+        if not args.validated:
+            message = utils.list_to_ClassifyRequestRecordList([record])
+            task_resend_to_master(message)
 
     if args.test:
         logger.debug("Running tests")
@@ -389,5 +688,15 @@ if __name__ == '__main__':
         else:
             message = task_update_record(message,pipeline='test')
 
-
     logger.info("Done - run.py")
+    return args
+
+
+
+# =============================== MAIN ======================================= #
+
+# To test the classifier
+# python run.py -n -r ClassifierPipeline/tests/stub_data/stub_new_records.csv
+
+if __name__ == '__main__':
+    main()

@@ -22,6 +22,8 @@ DELAY_MESSAGE = True
 FAKE_DATA = False
 
 # Batching configuration
+# Number of input file records grouped into one outer ingest message.
+FILE_INGEST_BATCH_SIZE = 500
 # Number of records grouped into one classify task payload.
 CLASSIFY_STAGE_BATCH_SIZE = 100
 # Number of real records sent into one classifier preprocessing/inference call.
@@ -32,6 +34,7 @@ MODEL_DEVICE = "cpu"
 MODEL_NUM_THREADS = 4
 MODEL_NUM_INTEROP_THREADS = 1
 TOKENIZERS_PARALLELISM = False
+PRE_INGEST_OUTPUT_PREFIX = "input-text"
 
 #Data to Skip message from Master Pipeline
 TEST_INPUT_DATA = 'ClassifierPipeline/tests/stub_data/classifier_request.json'
